@@ -1,4 +1,4 @@
-import glob
+import logging
 import os
 import re
 import tempfile
@@ -7,7 +7,8 @@ from typing import Tuple
 import httpx
 import librosa
 import numpy as np
-import yt_dlp
+
+logger = logging.getLogger(__name__)
 
 INVIDIOUS_INSTANCES = [
     "https://inv.nadeko.net",
@@ -87,7 +88,8 @@ def _download_from_invidious(video_id: str) -> Tuple[str, str]:
     last_error: Exception = RuntimeError("No instances configured")
     for instance in INVIDIOUS_INSTANCES:
         try:
-            with httpx.Client(timeout=15) as client:
+            logger.info("Trying Invidious instance: %s", instance)
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
                 resp = client.get(f"{instance}/api/v1/videos/{video_id}")
                 resp.raise_for_status()
                 data = resp.json()
@@ -100,14 +102,16 @@ def _download_from_invidious(video_id: str) -> Tuple[str, str]:
             tmp_dir = tempfile.mkdtemp()
             audio_path = os.path.join(tmp_dir, f"{video_id}.{ext}")
 
-            with httpx.stream("GET", audio_url, timeout=120) as r:
+            with httpx.stream("GET", audio_url, timeout=120, follow_redirects=True) as r:
                 r.raise_for_status()
                 with open(audio_path, "wb") as f:
                     for chunk in r.iter_bytes(chunk_size=65536):
                         f.write(chunk)
 
+            logger.info("Downloaded via %s", instance)
             return audio_path, title
         except Exception as e:
+            logger.warning("Invidious instance %s failed: %s", instance, e)
             last_error = e
             continue
 
@@ -118,28 +122,5 @@ def download_audio(url: str) -> Tuple[str, str, str]:
     """Download audio from YouTube URL. Returns (file_path, title, video_id)."""
     video_id = _extract_video_id(url)
 
-    # Primary: Invidious (no cookies, no bot detection issues)
-    try:
-        audio_path, title = _download_from_invidious(video_id)
-        return audio_path, title, video_id
-    except Exception:
-        pass
-
-    # Fallback: yt-dlp (works locally; may fail on cloud due to bot detection)
-    tmp_dir = tempfile.mkdtemp()
-    ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-        "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
-        "quiet": True,
-        "no_warnings": True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        title = info.get("title", "")
-        video_id = info.get("id", "")
-
-    files = glob.glob(os.path.join(tmp_dir, f"{video_id}.*"))
-    if not files:
-        raise FileNotFoundError(f"Downloaded file not found for {video_id}")
-
-    return files[0], title, video_id
+    audio_path, title = _download_from_invidious(video_id)
+    return audio_path, title, video_id
