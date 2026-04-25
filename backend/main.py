@@ -66,7 +66,7 @@ async def analyze(request: AnalyzeRequest):
     try:
         beeps = detect_beeps(file_path)
     except Exception:
-        raise HTTPException(status_code=500, detail="音頻下載失敗，請稍後再試")
+        raise HTTPException(status_code=500, detail="音頻分析失敗，請稍後再試")
     finally:
         shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
 
