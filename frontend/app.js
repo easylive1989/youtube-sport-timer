@@ -14,8 +14,9 @@ window.onYouTubeIframeAPIReady = function () {
 
 // --- Player ---
 function initPlayer(videoId) {
-  const container = document.getElementById('youtube-player');
-  container.innerHTML = '';
+  if (ytPlayer && typeof ytPlayer.destroy === 'function') {
+    ytPlayer.destroy();
+  }
   ytPlayer = new YT.Player('youtube-player', {
     videoId,
     playerVars: { mute: 1, rel: 0, modestbranding: 1 },
@@ -159,7 +160,8 @@ function escapeHtml(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function loadFromHistory(videoId) {
@@ -178,7 +180,7 @@ function deleteFromHistory(videoId) {
 }
 
 function setBeeps(beeps) {
-  currentBeeps = beeps;
+  currentBeeps = [...beeps].sort((a, b) => a - b);
   playedBeepIndices.clear();
   lastKnownTime = 0;
 }
