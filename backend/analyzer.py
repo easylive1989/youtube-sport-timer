@@ -1,12 +1,21 @@
-import base64
 import glob
 import os
+import re
 import tempfile
 from typing import Tuple
 
+import httpx
 import librosa
 import numpy as np
 import yt_dlp
+
+INVIDIOUS_INSTANCES = [
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://invidious.privacyredirect.com",
+    "https://yt.artemislena.eu",
+    "https://invidious.flokinet.to",
+]
 
 
 def detect_beeps(audio_path: str) -> list[float]:
@@ -31,8 +40,7 @@ def detect_beeps(audio_path: str) -> list[float]:
         y=y, sr=sr, hop_length=hop_length
     )[0]
 
-    # Adaptive energy threshold: 10x the median RMS across all frames
-    # This cleanly separates electronic beeps (loud) from background noise
+    # Adaptive energy threshold: 3x the median RMS across all frames
     onset_energies = [
         float(rms[min(int(f), len(rms) - 1)]) for f in onset_frames
     ]
@@ -60,36 +68,75 @@ def detect_beeps(audio_path: str) -> list[float]:
     return [round(t, 2) for t in merged]
 
 
-def _write_cookies_file() -> str | None:
-    cookies_b64 = os.getenv("YOUTUBE_COOKIES")
-    if not cookies_b64:
-        return None
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-    tmp.write(base64.b64decode(cookies_b64).decode("utf-8"))
-    tmp.close()
-    return tmp.name
+def _extract_video_id(url: str) -> str:
+    match = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url)
+    if not match:
+        raise ValueError(f"Cannot extract video ID from: {url}")
+    return match.group(1)
+
+
+def _best_audio_format(formats: list) -> dict:
+    audio = [f for f in formats if f.get("type", "").startswith("audio/")]
+    if not audio:
+        raise ValueError("No audio-only formats found")
+    return max(audio, key=lambda f: int(f.get("bitrate", 0)))
+
+
+def _download_from_invidious(video_id: str) -> Tuple[str, str]:
+    """Try each Invidious instance in order. Returns (audio_path, title)."""
+    last_error: Exception = RuntimeError("No instances configured")
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.get(f"{instance}/api/v1/videos/{video_id}")
+                resp.raise_for_status()
+                data = resp.json()
+
+            title = data.get("title", "")
+            fmt = _best_audio_format(data.get("adaptiveFormats", []))
+            audio_url = fmt["url"]
+            ext = "m4a" if "mp4" in fmt.get("type", "") else "webm"
+
+            tmp_dir = tempfile.mkdtemp()
+            audio_path = os.path.join(tmp_dir, f"{video_id}.{ext}")
+
+            with httpx.stream("GET", audio_url, timeout=120) as r:
+                r.raise_for_status()
+                with open(audio_path, "wb") as f:
+                    for chunk in r.iter_bytes(chunk_size=65536):
+                        f.write(chunk)
+
+            return audio_path, title
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise RuntimeError(f"All Invidious instances failed: {last_error}")
 
 
 def download_audio(url: str) -> Tuple[str, str, str]:
     """Download audio from YouTube URL. Returns (file_path, title, video_id)."""
+    video_id = _extract_video_id(url)
+
+    # Primary: Invidious (no cookies, no bot detection issues)
+    try:
+        audio_path, title = _download_from_invidious(video_id)
+        return audio_path, title, video_id
+    except Exception:
+        pass
+
+    # Fallback: yt-dlp (works locally; may fail on cloud due to bot detection)
     tmp_dir = tempfile.mkdtemp()
-    cookies_file = _write_cookies_file()
     ydl_opts = {
         "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
         "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
     }
-    if cookies_file:
-        ydl_opts["cookiefile"] = cookies_file
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = info.get("title", "")
-            video_id = info.get("id", "")
-    finally:
-        if cookies_file:
-            os.unlink(cookies_file)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        title = info.get("title", "")
+        video_id = info.get("id", "")
 
     files = glob.glob(os.path.join(tmp_dir, f"{video_id}.*"))
     if not files:
