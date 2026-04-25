@@ -1,3 +1,4 @@
+import base64
 import glob
 import os
 import tempfile
@@ -59,19 +60,36 @@ def detect_beeps(audio_path: str) -> list[float]:
     return [round(t, 2) for t in merged]
 
 
+def _write_cookies_file() -> str | None:
+    cookies_b64 = os.getenv("YOUTUBE_COOKIES")
+    if not cookies_b64:
+        return None
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    tmp.write(base64.b64decode(cookies_b64).decode("utf-8"))
+    tmp.close()
+    return tmp.name
+
+
 def download_audio(url: str) -> Tuple[str, str, str]:
     """Download audio from YouTube URL. Returns (file_path, title, video_id)."""
     tmp_dir = tempfile.mkdtemp()
+    cookies_file = _write_cookies_file()
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        title = info.get("title", "")
-        video_id = info.get("id", "")
+    if cookies_file:
+        ydl_opts["cookiefile"] = cookies_file
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "")
+            video_id = info.get("id", "")
+    finally:
+        if cookies_file:
+            os.unlink(cookies_file)
 
     files = glob.glob(os.path.join(tmp_dir, f"{video_id}.*"))
     if not files:
