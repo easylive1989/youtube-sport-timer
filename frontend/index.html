@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Sport Timer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="input-section">
+      <div id="input-row">
+        <input type="text" id="url-input" placeholder="貼上 YouTube 網址" autocomplete="off" />
+        <button id="analyze-btn">分析</button>
+      </div>
+      <p id="status-msg"></p>
+    </section>
+
+    <section id="player-section" hidden>
+      <div id="player-wrapper">
+        <div id="youtube-player"></div>
+      </div>
+      <div id="timer-bar">
+        <div id="countdown-fill"></div>
+      </div>
+      <div id="controls">
+        <button id="play-pause-btn">▶ 播放</button>
+        <span id="next-beep-label">--</span>
+      </div>
+    </section>
+
+    <section id="history-section">
+      <h2>歷史紀錄</h2>
+      <ul id="history-list"></ul>
+    </section>
+  </div>
+
+  <div id="flash-overlay" hidden></div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="config.js"></script>
+  <script src="storage.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
