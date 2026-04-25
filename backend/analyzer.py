@@ -75,7 +75,7 @@ def download_audio(url: str) -> Tuple[str, str, str]:
     tmp_dir = tempfile.mkdtemp()
     cookies_file = _write_cookies_file()
     ydl_opts = {
-        "format": "bestaudio/best",
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
         "outtmpl": os.path.join(tmp_dir, "%(id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
