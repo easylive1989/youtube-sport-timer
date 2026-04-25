@@ -37,7 +37,7 @@ def detect_beeps(audio_path: str) -> list[float]:
         float(rms[min(int(f), len(rms) - 1)]) for f in onset_frames
     ]
     global_median_rms = float(np.median(rms))
-    energy_threshold = max(global_median_rms * 10.0, 1e-6)
+    energy_threshold = max(global_median_rms * 3.0, 1e-6)
 
     candidates = []
     for t, frame_idx, energy in zip(onset_times, onset_frames, onset_energies):
