@@ -125,7 +125,7 @@ function updateCountdown(currentTime) {
   const fraction = Math.max(0, Math.min(1, 1 - timeToNext / interval));
 
   fill.style.width = `${fraction * 100}%`;
-  label.textContent = `下一聲：${Math.ceil(timeToNext)}s`;
+  label.textContent = `${Math.ceil(timeToNext)}s`;
 }
 
 // --- Audio + Visual ---

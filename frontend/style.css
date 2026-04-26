@@ -83,7 +83,14 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   height: 100% !important;
 }
 
+#timer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 #timer-bar {
+  flex: 1;
   height: 8px;
   background: #333;
   border-radius: 4px;
@@ -98,15 +105,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 4px;
 }
 
-#controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
 #next-beep-label {
-  font-size: 16px;
+  font-size: 14px;
   color: #aaa;
+  min-width: 32px;
+  text-align: right;
 }
 
 /* History */
@@ -270,7 +273,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   #player-section {
     display: grid;
     grid-template-columns: 1fr 180px;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto;
     column-gap: 12px;
     row-gap: 6px;
   }
@@ -283,21 +286,16 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     height: 200px;
   }
 
-  #timer-bar {
+  #timer-row {
     grid-column: 1;
     grid-row: 2;
     align-self: center;
   }
 
-  #controls {
-    grid-column: 1;
-    grid-row: 3;
-  }
-
   /* 右欄：通知點列表，跨滿三列 */
   #timer-edit {
     grid-column: 2;
-    grid-row: 1 / 4;
+    grid-row: 1 / 3;
     display: flex;
     flex-direction: column;
     min-height: 0;
