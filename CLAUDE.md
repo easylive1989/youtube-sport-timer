@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 YouTube Sport Timer — 分析 YouTube 影片音訊，偵測計時嗶聲（如運動賽事的電子計時器），並在播放時同步觸發聲音與視覺提示。
 
-- **Backend**：Python FastAPI，部署在 Render（`render.yaml`）
+- **Backend**：Python FastAPI，部署在 VPS（systemd service `youtube-sport`）
 - **Frontend**：原生 HTML/CSS/JS，部署在 GitHub Pages（`https://easylive1989.github.io`）
 
 ## 開發環境啟動
@@ -44,7 +44,7 @@ uvicorn main:app --reload
 
 ### 架構
 
-- `main.py`：FastAPI 應用，含 `/health` 與 `/analyze` 兩個端點。嗶聲結果以 JSON 檔案快取在 `CACHE_DIR`（預設 `/opt/app/cache`，本機開發時由 env 覆寫）。
+- `main.py`：FastAPI 應用，含 `/health` 與 `/analyze` 兩個端點。嗶聲結果以 JSON 檔案快取在 `CACHE_DIR`（預設 `backend/cache/`，VPS 上由 `/etc/youtube-sport.env` 覆蓋）。
 - `analyzer.py`：音訊分析核心。流程：`download_audio`（`yt-dlp`）→ `_to_wav`（`ffmpeg`，重新取樣至 11025 Hz mono）→ `detect_beeps`（`librosa` onset detection + RMS/spectral centroid 過濾 → 合併相距 0.3s 以內的候選點）。
 - `YOUTUBE_COOKIES` 環境變數：base64 編碼的 cookies.txt，用於存取受限影片。可用 `deploy-cookies.sh` 部署至 VPS。
 
@@ -87,6 +87,6 @@ python3 -m http.server 5500 --directory frontend
 
 ## 部署
 
-- **Backend**：push 至 main 自動部署（Render `autoDeploy: true`）
+- **Backend**：VPS（`178.104.240.236`），以 systemd service `youtube-sport` 運行。環境變數存於 `/etc/youtube-sport.env`（含 `YOUTUBE_COOKIES`、`ALLOWED_ORIGINS` 等）。
 - **Frontend**：GitHub Pages，從 `frontend/` 目錄提供靜態檔案
-- **Cookies 更新**：`./deploy-cookies.sh /path/to/cookies.txt`（SSH 到 VPS，環境變數寫入 `/etc/youtube-sport.env`）
+- **Cookies 更新**：`./deploy-cookies.sh /path/to/cookies.txt`（SSH 至 VPS，寫入 `/etc/youtube-sport.env` 後重啟服務）

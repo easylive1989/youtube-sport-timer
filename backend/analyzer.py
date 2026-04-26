@@ -3,13 +3,20 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
+from pathlib import Path
 from typing import Tuple
 
 import librosa
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+def _yt_dlp_bin() -> str:
+    # Prefer yt-dlp in the same venv as the running Python interpreter
+    candidate = Path(sys.executable).parent / "yt-dlp"
+    return str(candidate) if candidate.exists() else "yt-dlp"
 
 
 def _to_wav(audio_path: str) -> str:
@@ -103,12 +110,15 @@ def download_audio(url: str) -> Tuple[str, str, str]:
     output_template = os.path.join(tmp_dir, f"{video_id}.%(ext)s")
 
     cmd = [
-        "yt-dlp",
+        _yt_dlp_bin(),
         "--format", "bestaudio",
         "--output", output_template,
         "--no-playlist",
         "--quiet",
         "--print", "title",
+        "--no-simulate",           # newer yt-dlp: --print implies --simulate, override it
+        "--js-runtimes", "node",   # YouTube JS challenge solver
+        "--remote-components", "ejs:github",
         url,
     ]
 

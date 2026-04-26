@@ -3,6 +3,9 @@ set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
+# Add common Node.js paths so yt-dlp can find a JS runtime
+export PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Resolve python from venv or system
 if [ -f "$ROOT/backend/.venv/bin/python" ]; then
   PYTHON="$ROOT/backend/.venv/bin/python"

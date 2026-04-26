@@ -23,7 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-CACHE_DIR = Path(os.getenv("CACHE_DIR", "/opt/app/cache"))
+CACHE_DIR = Path(os.getenv("CACHE_DIR", Path(__file__).parent / "cache"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
