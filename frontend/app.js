@@ -29,7 +29,7 @@ function initPlayer(videoId) {
     videoId,
     playerVars: { mute: 1, rel: 0, modestbranding: 1 },
     events: {
-      onReady: (e) => e.target.mute(),
+      onReady: (e) => { e.target.mute(); e.target.setVolume(0); },
       onStateChange: onPlayerStateChange,
     },
   });
@@ -38,6 +38,8 @@ function initPlayer(videoId) {
 function onPlayerStateChange(event) {
   if (event.data === YT.PlayerState.PLAYING && !isPlaying) {
     isPlaying = true;
+    event.target.mute();
+    event.target.setVolume(0);
     startTicker();
   } else if (
     (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) &&
