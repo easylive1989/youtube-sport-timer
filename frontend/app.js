@@ -6,6 +6,7 @@ let timerIntervalId = null;
 let isPlaying = false;
 let lastKnownTime = 0;
 let audioCtx = null;
+let beepVolume = 0.6;
 let currentVideoId = null;
 
 // --- YouTube IFrame API callback (must be global) ---
@@ -138,7 +139,7 @@ async function playBeep() {
   gain.connect(audioCtx.destination);
   osc.frequency.value = 880;
   osc.type = 'sine';
-  gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+  gain.gain.setValueAtTime(beepVolume, audioCtx.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
   osc.start(audioCtx.currentTime);
   osc.stop(audioCtx.currentTime + 0.2);
@@ -386,6 +387,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('add-current-btn').addEventListener('click', () => {
     if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
     addBeep(ytPlayer.getCurrentTime());
+  });
+
+  document.getElementById('volume-down-btn').addEventListener('click', () => {
+    beepVolume = Math.max(0.1, Math.round((beepVolume - 0.1) * 10) / 10);
+  });
+
+  document.getElementById('volume-up-btn').addEventListener('click', () => {
+    beepVolume = Math.min(1.0, Math.round((beepVolume + 0.1) * 10) / 10);
   });
 
 
