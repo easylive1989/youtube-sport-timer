@@ -226,7 +226,7 @@ function renderTimerList() {
   const list = document.getElementById('timer-list');
   const count = document.getElementById('timer-count');
   if (!list || !count) return;
-  count.textContent = `共 ${currentBeeps.length} 個 timer`;
+  count.textContent = '';
   list.innerHTML = '';
   if (currentBeeps.length === 0) {
     list.innerHTML = '<li class="empty">尚無 timer，請新增或重新分析</li>';
@@ -252,14 +252,7 @@ function renderTimerList() {
   });
 }
 
-function updateAddCurrentLabel() {
-  const btn = document.getElementById('add-current-btn');
-  if (!btn) return;
-  const t = (ytPlayer && typeof ytPlayer.getCurrentTime === 'function')
-    ? ytPlayer.getCurrentTime()
-    : 0;
-  btn.textContent = `在 ${formatTime(t)} 新增通知點`;
-}
+function updateAddCurrentLabel() {}
 
 function addBeep(t) {
   const rounded = Math.round(t * 100) / 100;
