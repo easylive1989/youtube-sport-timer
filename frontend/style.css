@@ -218,6 +218,19 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   padding: 4px 0;
 }
 
+#timer-list .timer-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+#timer-list .offset-btn {
+  padding: 4px 7px;
+  font-size: 12px;
+  background: #2c4a7c;
+  flex-shrink: 0;
+}
+
 #timer-list .delete-btn {
   padding: 4px 8px;
   font-size: 13px;
@@ -285,5 +298,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     max-height: none;
     min-height: 0;
     overflow-y: auto;
+  }
+
+  #timer-list .offset-btn {
+    display: none;
   }
 }

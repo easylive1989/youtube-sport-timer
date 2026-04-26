@@ -253,12 +253,22 @@ function renderTimerList() {
         ytPlayer.seekTo(t, true);
       }
     });
+    const actions = document.createElement('div');
+    actions.className = 'timer-actions';
+    [10, 30, 60].forEach((offset) => {
+      const btn = document.createElement('button');
+      btn.className = 'offset-btn';
+      btn.textContent = `+${offset}`;
+      btn.addEventListener('click', () => addBeep(t + offset));
+      actions.appendChild(btn);
+    });
     const delBtn = document.createElement('button');
     delBtn.className = 'delete-btn';
     delBtn.textContent = '×';
     delBtn.addEventListener('click', () => removeBeepAt(i));
+    actions.appendChild(delBtn);
     li.appendChild(timeEl);
-    li.appendChild(delBtn);
+    li.appendChild(actions);
     list.appendChild(li);
   });
 }
