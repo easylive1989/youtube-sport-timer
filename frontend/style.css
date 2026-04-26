@@ -110,12 +110,24 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 /* History */
+#history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
 #history-section h2 {
   font-size: 14px;
   color: #777;
-  margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+#share-btn {
+  font-size: 13px;
+  padding: 6px 12px;
+  background: #2d6a4f;
 }
 
 #history-list {

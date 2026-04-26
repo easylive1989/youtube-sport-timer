@@ -220,6 +220,7 @@ function showPlayer(videoId) {
   isPlaying = false;
   document.getElementById('countdown-fill').style.width = '0%';
   document.getElementById('next-beep-label').textContent = '--';
+  updateURL();
   initPlayer(videoId);
 }
 
@@ -291,6 +292,15 @@ function persistCurrentBeeps() {
   if (!record) return;
   Storage.save(currentVideoId, { ...record, beeps: [...currentBeeps] });
   renderHistory();
+  updateURL();
+}
+
+function updateURL() {
+  if (!currentVideoId) return;
+  const params = new URLSearchParams();
+  params.set('v', currentVideoId);
+  if (currentBeeps.length > 0) params.set('t', currentBeeps.join(','));
+  history.replaceState(null, '', '?' + params.toString());
 }
 
 
@@ -301,6 +311,37 @@ function extractVideoId(url) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Restore from URL params (bookmarks / shared links)
+  const params = new URLSearchParams(window.location.search);
+  const urlVideoId = params.get('v');
+  if (urlVideoId) {
+    const urlBeeps = params.get('t')
+      ? params.get('t').split(',').map(Number).filter(n => !isNaN(n) && n >= 0)
+      : null;
+    const url = `https://www.youtube.com/watch?v=${urlVideoId}`;
+    document.getElementById('url-input').value = url;
+    if (!audioCtx) audioCtx = new AudioContext();
+    const existing = Storage.load(urlVideoId);
+    const beeps = urlBeeps ?? (existing?.beeps || []);
+    if (!existing) {
+      Storage.save(urlVideoId, { url, video_id: urlVideoId, title: '', beeps, analyzed_at: new Date().toISOString() });
+    } else if (urlBeeps) {
+      Storage.save(urlVideoId, { ...existing, beeps });
+    }
+    setBeeps(beeps);
+    showPlayer(urlVideoId);
+    renderHistory();
+  }
+
+  document.getElementById('share-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      const btn = document.getElementById('share-btn');
+      const original = btn.textContent;
+      btn.textContent = '已複製！';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    });
+  });
+
   document.getElementById('load-btn').addEventListener('click', () => {
     const url = document.getElementById('url-input').value.trim();
     if (!url) return;
