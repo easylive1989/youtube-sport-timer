@@ -239,7 +239,7 @@ function renderTimerList() {
   count.textContent = '';
   list.innerHTML = '';
   if (currentBeeps.length === 0) {
-    list.innerHTML = '<li class="empty">尚無 timer，請新增或重新分析</li>';
+    list.innerHTML = '<li class="empty">新增一個 timer</li>';
     return;
   }
   currentBeeps.forEach((t, i) => {

@@ -169,6 +169,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   display: flex;
   gap: 6px;
   align-items: center;
+  margin-bottom: 8px;
 }
 
 #add-current-btn {
