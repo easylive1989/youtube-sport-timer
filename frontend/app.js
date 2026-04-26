@@ -13,6 +13,13 @@ window.onYouTubeIframeAPIReady = function () {
   renderHistory();
 };
 
+// Resume AudioContext when page comes back to foreground (mobile)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+});
+
 // --- Player ---
 function initPlayer(videoId) {
   if (ytPlayer && typeof ytPlayer.destroy === 'function') {
@@ -55,6 +62,10 @@ function stopTicker() {
 
 function tick() {
   if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
+
+  // Keep AudioContext alive on mobile (browsers suspend it in background)
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+
   const currentTime = ytPlayer.getCurrentTime();
 
   // Detect backward seek → allow already-played beeps to fire again
@@ -104,9 +115,9 @@ function updateCountdown(currentTime) {
 }
 
 // --- Audio + Visual ---
-function playBeep() {
+async function playBeep() {
   if (!audioCtx) audioCtx = new AudioContext();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.connect(gain);
