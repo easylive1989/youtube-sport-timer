@@ -10,12 +10,14 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+PIPED_INSTANCES = [
+    "https://api.piped.private.coffee",
+    "https://pipedapi.leptons.xyz",
+    "https://pipedapi-libre.kavin.rocks",
+]
+
 INVIDIOUS_INSTANCES = [
-    "https://inv.nadeko.net",
-    "https://invidious.nerdvpn.de",
-    "https://invidious.privacyredirect.com",
-    "https://yt.artemislena.eu",
-    "https://invidious.flokinet.to",
+    "https://inv.thepixora.com",
 ]
 
 
@@ -83,6 +85,45 @@ def _best_audio_format(formats: list) -> dict:
     return max(audio, key=lambda f: int(f.get("bitrate", 0)))
 
 
+def _download_from_piped(video_id: str) -> Tuple[str, str]:
+    """Try each Piped instance in order. Returns (audio_path, title)."""
+    last_error: Exception = RuntimeError("No instances configured")
+    for instance in PIPED_INSTANCES:
+        try:
+            logger.info("Trying Piped instance: %s", instance)
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
+                resp = client.get(f"{instance}/streams/{video_id}")
+                resp.raise_for_status()
+                data = resp.json()
+
+            title = data.get("title", "")
+            audio_streams = data.get("audioStreams", [])
+            if not audio_streams:
+                raise ValueError("No audio streams found")
+
+            best = max(audio_streams, key=lambda s: s.get("bitrate", 0))
+            audio_url = best["url"]
+            ext = "m4a" if "mp4" in best.get("mimeType", "") else "webm"
+
+            tmp_dir = tempfile.mkdtemp()
+            audio_path = os.path.join(tmp_dir, f"{video_id}.{ext}")
+
+            with httpx.stream("GET", audio_url, timeout=120, follow_redirects=True) as r:
+                r.raise_for_status()
+                with open(audio_path, "wb") as f:
+                    for chunk in r.iter_bytes(chunk_size=65536):
+                        f.write(chunk)
+
+            logger.info("Downloaded via Piped %s", instance)
+            return audio_path, title
+        except Exception as e:
+            logger.warning("Piped instance %s failed: %s", instance, e)
+            last_error = e
+            continue
+
+    raise RuntimeError(f"All Piped instances failed: {last_error}")
+
+
 def _download_from_invidious(video_id: str) -> Tuple[str, str]:
     """Try each Invidious instance in order. Returns (audio_path, title)."""
     last_error: Exception = RuntimeError("No instances configured")
@@ -122,5 +163,13 @@ def download_audio(url: str) -> Tuple[str, str, str]:
     """Download audio from YouTube URL. Returns (file_path, title, video_id)."""
     video_id = _extract_video_id(url)
 
+    # Try Piped first (more instances available)
+    try:
+        audio_path, title = _download_from_piped(video_id)
+        return audio_path, title, video_id
+    except Exception as e:
+        logger.warning("All Piped instances failed, trying Invidious: %s", e)
+
+    # Fallback: Invidious
     audio_path, title = _download_from_invidious(video_id)
     return audio_path, title, video_id
