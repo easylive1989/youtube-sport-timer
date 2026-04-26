@@ -270,37 +270,39 @@ function persistCurrentBeeps() {
 
 
 // --- DOM Events ---
+function extractVideoId(url) {
+  const match = url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('analyze-btn').addEventListener('click', async () => {
+  document.getElementById('load-btn').addEventListener('click', () => {
     const url = document.getElementById('url-input').value.trim();
     if (!url) return;
 
     const statusMsg = document.getElementById('status-msg');
-    const btn = document.getElementById('analyze-btn');
-    btn.disabled = true;
-    statusMsg.textContent = '分析中...';
+    const videoId = extractVideoId(url);
+    if (!videoId) {
+      statusMsg.textContent = '無效的 YouTube 網址';
+      return;
+    }
 
-    try {
-      const result = await API.analyze(url, (msg) => { statusMsg.textContent = msg; });
-      setBeeps(result.beeps);
-      Storage.save(result.video_id, {
+    statusMsg.textContent = '';
+    const existing = Storage.load(videoId);
+    if (existing) {
+      setBeeps(existing.beeps || []);
+    } else {
+      setBeeps([]);
+      Storage.save(videoId, {
         url,
-        video_id: result.video_id,
-        title: result.title,
-        beeps: result.beeps,
+        video_id: videoId,
+        title: '',
+        beeps: [],
         analyzed_at: new Date().toISOString(),
       });
-      statusMsg.textContent =
-        result.beeps.length > 0
-          ? `找到 ${result.beeps.length} 個嗶聲`
-          : '未偵測到計時嗶聲';
-      showPlayer(result.video_id);
-      renderHistory();
-    } catch (err) {
-      statusMsg.textContent = `錯誤：${err.message}`;
-    } finally {
-      btn.disabled = false;
     }
+    showPlayer(videoId);
+    renderHistory();
   });
 
   document.getElementById('play-pause-btn').addEventListener('click', () => {
