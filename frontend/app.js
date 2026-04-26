@@ -208,12 +208,6 @@ function formatTime(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function parseTime(str) {
-  if (!/^\d+:\d{1,2}$/.test(str)) return null;
-  const [m, s] = str.split(':').map(Number);
-  if (s >= 60) return null;
-  return m * 60 + s;
-}
 
 function renderTimerList() {
   const list = document.getElementById('timer-list');
@@ -274,18 +268,6 @@ function persistCurrentBeeps() {
   renderHistory();
 }
 
-function handleManualAdd() {
-  const input = document.getElementById('manual-time-input');
-  input.classList.remove('invalid');
-  const t = parseTime(input.value.trim());
-  if (t === null) {
-    input.classList.add('invalid');
-    document.getElementById('status-msg').textContent = '時間格式錯誤，請輸入 mm:ss（例如 1:23）';
-    return;
-  }
-  addBeep(t);
-  input.value = '';
-}
 
 // --- DOM Events ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -337,9 +319,5 @@ document.addEventListener('DOMContentLoaded', () => {
     addBeep(ytPlayer.getCurrentTime());
   });
 
-  document.getElementById('add-manual-btn').addEventListener('click', handleManualAdd);
 
-  document.getElementById('manual-time-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') handleManualAdd();
-  });
 });
