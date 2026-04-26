@@ -226,6 +226,9 @@ function setBeeps(beeps) {
   lastKnownTime = 0;
   renderTimerList();
   updateAddCurrentLabel();
+  const t = (ytPlayer && typeof ytPlayer.getCurrentTime === 'function')
+    ? ytPlayer.getCurrentTime() : 0;
+  updateCountdown(t);
 }
 
 function showPlayer(videoId) {
