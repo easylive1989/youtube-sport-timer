@@ -26,7 +26,7 @@ def _to_wav(audio_path: str) -> str:
     """Convert audio to WAV so soundfile (not slow audioread) handles loading."""
     wav_path = os.path.splitext(audio_path)[0] + '.wav'
     subprocess.run(
-        ['ffmpeg', '-i', audio_path, '-ar', '22050', '-ac', '1', '-y', '-loglevel', 'error', wav_path],
+        ['ffmpeg', '-i', audio_path, '-ar', '11025', '-ac', '1', '-y', '-loglevel', 'error', wav_path],
         check=True,
     )
     return wav_path
@@ -36,9 +36,9 @@ def detect_beeps(audio_path: str) -> list[float]:
     """Return timestamps (seconds) of electronic beeps in an audio file."""
     try:
         wav_path = _to_wav(audio_path)
-        y, sr = librosa.load(wav_path, sr=22050, mono=True)
+        y, sr = librosa.load(wav_path, sr=11025, mono=True)
     except Exception:
-        y, sr = librosa.load(audio_path, sr=22050, mono=True)
+        y, sr = librosa.load(audio_path, sr=11025, mono=True)
     if len(y) == 0:
         return []
 
