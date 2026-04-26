@@ -1,10 +1,7 @@
 const API = (() => {
+  // Only instances with Access-Control-Allow-Origin: * (required for browser fetch)
   const PIPED_INSTANCES = [
     'https://api.piped.private.coffee',
-    'https://pipedapi.leptons.xyz',
-    'https://pipedapi-libre.kavin.rocks',
-    'https://api.piped.projectsegfau.lt',
-    'https://pipedapi.in.projectsegfau.lt',
   ];
 
   function extractVideoId(url) {
