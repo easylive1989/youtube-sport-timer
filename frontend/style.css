@@ -143,20 +143,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 14px;
 }
 
-#history-list .actions {
-  display: flex;
-  gap: 6px;
+#history-list .delete-btn {
+  padding: 5px 10px;
+  font-size: 13px;
+  background: #742a2a;
   flex-shrink: 0;
 }
 
-#history-list .actions button {
-  padding: 5px 10px;
-  font-size: 13px;
-  background: #2d2d2d;
-}
-
-#history-list .actions button.delete-btn {
-  background: #742a2a;
+#history-list li:hover {
+  background: #2a2a2a;
 }
 
 #history-list .empty {

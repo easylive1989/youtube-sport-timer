@@ -173,11 +173,10 @@ function renderHistory() {
     const safeId = item.video_id.replace(/[^A-Za-z0-9_-]/g, '');
     li.innerHTML = `
       <span class="title">${escapeHtml(item.title || item.video_id)}</span>
-      <div class="actions">
-        <button onclick="loadFromHistory('${safeId}')">載入</button>
-        <button class="delete-btn" onclick="deleteFromHistory('${safeId}')">刪除</button>
-      </div>
+      <button class="delete-btn" onclick="event.stopPropagation(); deleteFromHistory('${safeId}')">刪除</button>
     `;
+    li.style.cursor = 'pointer';
+    li.addEventListener('click', () => loadFromHistory(safeId));
     list.appendChild(li);
   });
 }
@@ -254,7 +253,7 @@ function renderTimerList() {
     });
     const actions = document.createElement('div');
     actions.className = 'timer-actions';
-    [10, 30, 60].forEach((offset) => {
+    [5, 10, 20, 40].forEach((offset) => {
       const btn = document.createElement('button');
       btn.className = 'offset-btn';
       btn.textContent = `+${offset}`;
