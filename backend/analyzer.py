@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import subprocess
 import tempfile
 from typing import Tuple
 
@@ -21,9 +22,23 @@ INVIDIOUS_INSTANCES = [
 ]
 
 
+def _to_wav(audio_path: str) -> str:
+    """Convert audio to WAV so soundfile (not slow audioread) handles loading."""
+    wav_path = os.path.splitext(audio_path)[0] + '.wav'
+    subprocess.run(
+        ['ffmpeg', '-i', audio_path, '-ar', '22050', '-ac', '1', '-y', '-loglevel', 'error', wav_path],
+        check=True,
+    )
+    return wav_path
+
+
 def detect_beeps(audio_path: str) -> list[float]:
     """Return timestamps (seconds) of electronic beeps in an audio file."""
-    y, sr = librosa.load(audio_path, sr=22050, mono=True)
+    try:
+        wav_path = _to_wav(audio_path)
+        y, sr = librosa.load(wav_path, sr=22050, mono=True)
+    except Exception:
+        y, sr = librosa.load(audio_path, sr=22050, mono=True)
     if len(y) == 0:
         return []
 
