@@ -196,8 +196,7 @@ function loadFromHistory(videoId) {
   if (!item) return;
   document.getElementById('url-input').value = item.url;
   setBeeps(item.beeps);
-  document.getElementById('status-msg').textContent =
-    `已載入：${item.beeps.length} 個嗶聲`;
+  document.getElementById('status-msg').textContent = '';
   showPlayer(videoId);
 }
 
