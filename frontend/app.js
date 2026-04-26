@@ -27,7 +27,7 @@ function initPlayer(videoId) {
   }
   ytPlayer = new YT.Player('youtube-player', {
     videoId,
-    playerVars: { mute: 1, rel: 0, modestbranding: 1 },
+    playerVars: { rel: 0, modestbranding: 1 },
     events: { onStateChange: onPlayerStateChange },
   });
 }
@@ -35,14 +35,12 @@ function initPlayer(videoId) {
 function onPlayerStateChange(event) {
   if (event.data === YT.PlayerState.PLAYING && !isPlaying) {
     isPlaying = true;
-    document.getElementById('play-pause-btn').textContent = '⏸ 暫停';
     startTicker();
   } else if (
     (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) &&
     isPlaying
   ) {
     isPlaying = false;
-    document.getElementById('play-pause-btn').textContent = '▶ 播放';
     stopTicker();
   }
 }
@@ -206,7 +204,6 @@ function showPlayer(videoId) {
   section.removeAttribute('hidden');
   stopTicker();
   isPlaying = false;
-  document.getElementById('play-pause-btn').textContent = '▶ 播放';
   document.getElementById('countdown-fill').style.width = '0%';
   document.getElementById('next-beep-label').textContent = '--';
   initPlayer(videoId);
@@ -256,7 +253,7 @@ function updateAddCurrentLabel() {
   const t = (ytPlayer && typeof ytPlayer.getCurrentTime === 'function')
     ? ytPlayer.getCurrentTime()
     : 0;
-  btn.textContent = `在 ${formatTime(t)} 新增`;
+  btn.textContent = `在 ${formatTime(t)} 新增通知點`;
 }
 
 function addBeep(t) {
@@ -299,6 +296,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     statusMsg.textContent = '';
+    if (!audioCtx) audioCtx = new AudioContext();
+
     const existing = Storage.load(videoId);
     if (existing) {
       setBeeps(existing.beeps || []);
@@ -314,17 +313,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     showPlayer(videoId);
     renderHistory();
-  });
-
-  document.getElementById('play-pause-btn').addEventListener('click', () => {
-    if (!ytPlayer || typeof ytPlayer.playVideo !== 'function') return;
-    if (!audioCtx) audioCtx = new AudioContext();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    if (isPlaying) {
-      ytPlayer.pauseVideo();
-    } else {
-      ytPlayer.playVideo();
-    }
   });
 
   document.getElementById('add-current-btn').addEventListener('click', () => {
