@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import re
@@ -5,25 +6,13 @@ import subprocess
 import tempfile
 from typing import Tuple
 
-import httpx
 import librosa
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-PIPED_INSTANCES = [
-    "https://api.piped.private.coffee",
-    "https://pipedapi.leptons.xyz",
-    "https://pipedapi-libre.kavin.rocks",
-]
-
-INVIDIOUS_INSTANCES = [
-    "https://inv.thepixora.com",
-]
-
 
 def _to_wav(audio_path: str) -> str:
-    """Convert audio to WAV so soundfile (not slow audioread) handles loading."""
     wav_path = os.path.splitext(audio_path)[0] + '.wav'
     subprocess.run(
         ['ffmpeg', '-i', audio_path, '-ar', '11025', '-ac', '1', '-y', '-loglevel', 'error', wav_path],
@@ -58,7 +47,6 @@ def detect_beeps(audio_path: str) -> list[float]:
         y=y, sr=sr, hop_length=hop_length
     )[0]
 
-    # Adaptive energy threshold: 3x the median RMS across all frames
     onset_energies = [
         float(rms[min(int(f), len(rms) - 1)]) for f in onset_frames
     ]
@@ -77,7 +65,6 @@ def detect_beeps(audio_path: str) -> list[float]:
     if not candidates:
         return []
 
-    # Merge onsets within 300ms (beeps are ~200ms; tail onset can appear up to ~210ms later)
     merged = [candidates[0]]
     for t in candidates[1:]:
         if t - merged[-1] >= 0.3:
@@ -93,98 +80,56 @@ def _extract_video_id(url: str) -> str:
     return match.group(1)
 
 
-def _best_audio_format(formats: list) -> dict:
-    audio = [f for f in formats if f.get("type", "").startswith("audio/")]
-    if not audio:
-        raise ValueError("No audio-only formats found")
-    return max(audio, key=lambda f: int(f.get("bitrate", 0)))
-
-
-def _download_from_piped(video_id: str) -> Tuple[str, str]:
-    """Try each Piped instance in order. Returns (audio_path, title)."""
-    last_error: Exception = RuntimeError("No instances configured")
-    for instance in PIPED_INSTANCES:
-        try:
-            logger.info("Trying Piped instance: %s", instance)
-            with httpx.Client(timeout=15, follow_redirects=True) as client:
-                resp = client.get(f"{instance}/streams/{video_id}")
-                resp.raise_for_status()
-                data = resp.json()
-
-            title = data.get("title", "")
-            audio_streams = data.get("audioStreams", [])
-            if not audio_streams:
-                raise ValueError("No audio streams found")
-
-            best = max(audio_streams, key=lambda s: s.get("bitrate", 0))
-            audio_url = best["url"]
-            ext = "m4a" if "mp4" in best.get("mimeType", "") else "webm"
-
-            tmp_dir = tempfile.mkdtemp()
-            audio_path = os.path.join(tmp_dir, f"{video_id}.{ext}")
-
-            with httpx.stream("GET", audio_url, timeout=120, follow_redirects=True) as r:
-                r.raise_for_status()
-                with open(audio_path, "wb") as f:
-                    for chunk in r.iter_bytes(chunk_size=65536):
-                        f.write(chunk)
-
-            logger.info("Downloaded via Piped %s", instance)
-            return audio_path, title
-        except Exception as e:
-            logger.warning("Piped instance %s failed: %s", instance, e)
-            last_error = e
-            continue
-
-    raise RuntimeError(f"All Piped instances failed: {last_error}")
-
-
-def _download_from_invidious(video_id: str) -> Tuple[str, str]:
-    """Try each Invidious instance in order. Returns (audio_path, title)."""
-    last_error: Exception = RuntimeError("No instances configured")
-    for instance in INVIDIOUS_INSTANCES:
-        try:
-            logger.info("Trying Invidious instance: %s", instance)
-            with httpx.Client(timeout=15, follow_redirects=True) as client:
-                resp = client.get(f"{instance}/api/v1/videos/{video_id}")
-                resp.raise_for_status()
-                data = resp.json()
-
-            title = data.get("title", "")
-            fmt = _best_audio_format(data.get("adaptiveFormats", []))
-            audio_url = fmt["url"]
-            ext = "m4a" if "mp4" in fmt.get("type", "") else "webm"
-
-            tmp_dir = tempfile.mkdtemp()
-            audio_path = os.path.join(tmp_dir, f"{video_id}.{ext}")
-
-            with httpx.stream("GET", audio_url, timeout=120, follow_redirects=True) as r:
-                r.raise_for_status()
-                with open(audio_path, "wb") as f:
-                    for chunk in r.iter_bytes(chunk_size=65536):
-                        f.write(chunk)
-
-            logger.info("Downloaded via %s", instance)
-            return audio_path, title
-        except Exception as e:
-            logger.warning("Invidious instance %s failed: %s", instance, e)
-            last_error = e
-            continue
-
-    raise RuntimeError(f"All Invidious instances failed: {last_error}")
+def _write_cookies_file(tmp_dir: str) -> str | None:
+    """Write YOUTUBE_COOKIES env var (base64-encoded) to a temp cookies.txt."""
+    encoded = os.getenv("YOUTUBE_COOKIES", "")
+    if not encoded:
+        return None
+    try:
+        cookies_data = base64.b64decode(encoded).decode("utf-8")
+        cookies_path = os.path.join(tmp_dir, "cookies.txt")
+        with open(cookies_path, "w") as f:
+            f.write(cookies_data)
+        return cookies_path
+    except Exception as e:
+        logger.warning("Failed to decode YOUTUBE_COOKIES: %s", e)
+        return None
 
 
 def download_audio(url: str) -> Tuple[str, str, str]:
-    """Download audio from YouTube URL. Returns (file_path, title, video_id)."""
+    """Download audio via yt-dlp. Returns (file_path, title, video_id)."""
     video_id = _extract_video_id(url)
+    tmp_dir = tempfile.mkdtemp()
+    output_template = os.path.join(tmp_dir, f"{video_id}.%(ext)s")
 
-    # Try Piped first (more instances available)
-    try:
-        audio_path, title = _download_from_piped(video_id)
-        return audio_path, title, video_id
-    except Exception as e:
-        logger.warning("All Piped instances failed, trying Invidious: %s", e)
+    cmd = [
+        "yt-dlp",
+        "--format", "bestaudio",
+        "--output", output_template,
+        "--no-playlist",
+        "--quiet",
+        "--print", "title",
+        url,
+    ]
 
-    # Fallback: Invidious
-    audio_path, title = _download_from_invidious(video_id)
+    cookies_path = _write_cookies_file(tmp_dir)
+    if cookies_path:
+        cmd += ["--cookies", cookies_path]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        logger.error("yt-dlp stderr: %s", result.stderr)
+        raise RuntimeError(f"yt-dlp failed: {result.stderr[:200]}")
+
+    title = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+
+    # Find the downloaded file
+    downloaded = [
+        f for f in os.listdir(tmp_dir)
+        if f.startswith(video_id) and not f.endswith(".txt")
+    ]
+    if not downloaded:
+        raise RuntimeError("yt-dlp produced no output file")
+
+    audio_path = os.path.join(tmp_dir, downloaded[0])
     return audio_path, title, video_id
