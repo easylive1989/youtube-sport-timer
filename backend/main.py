@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import shutil
@@ -5,6 +6,8 @@ import time
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 
