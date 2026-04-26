@@ -205,10 +205,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusMsg = document.getElementById('status-msg');
     const btn = document.getElementById('analyze-btn');
     btn.disabled = true;
-    statusMsg.textContent = '分析中... 首次可能需 30–60 秒';
+    statusMsg.textContent = '分析中...';
 
     try {
-      const result = await API.analyze(url);
+      const result = await API.analyze(url, (msg) => { statusMsg.textContent = msg; });
       setBeeps(result.beeps);
       Storage.save(result.video_id, {
         url,
