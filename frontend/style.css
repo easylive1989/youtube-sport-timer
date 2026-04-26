@@ -145,7 +145,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 #history-list .history-actions {
   display: flex;
-  gap: 6px;
+  gap: 12px;
   flex-shrink: 0;
 }
 
@@ -232,10 +232,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 #timer-list .offset-btn {
-  padding: 4px 7px;
+  padding: 4px 0;
+  min-width: 36px;
   font-size: 12px;
   background: #2c4a7c;
   flex-shrink: 0;
+  text-align: center;
 }
 
 #timer-list .delete-btn {
@@ -243,6 +245,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 13px;
   background: #742a2a;
   flex-shrink: 0;
+  margin-left: 8px;
 }
 
 /* Flash overlay */
