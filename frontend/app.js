@@ -6,6 +6,7 @@ let timerIntervalId = null;
 let isPlaying = false;
 let lastKnownTime = 0;
 let audioCtx = null;
+let currentVideoId = null;
 
 // --- YouTube IFrame API callback (must be global) ---
 window.onYouTubeIframeAPIReady = function () {
@@ -76,6 +77,7 @@ function tick() {
   });
 
   updateCountdown(currentTime);
+  updateAddCurrentLabel();
 }
 
 function updateCountdown(currentTime) {
@@ -183,9 +185,12 @@ function setBeeps(beeps) {
   currentBeeps = [...beeps].sort((a, b) => a - b);
   playedBeepIndices.clear();
   lastKnownTime = 0;
+  renderTimerList();
+  updateAddCurrentLabel();
 }
 
 function showPlayer(videoId) {
+  currentVideoId = videoId;
   const section = document.getElementById('player-section');
   section.removeAttribute('hidden');
   stopTicker();
@@ -194,6 +199,92 @@ function showPlayer(videoId) {
   document.getElementById('countdown-fill').style.width = '0%';
   document.getElementById('next-beep-label').textContent = '--';
   initPlayer(videoId);
+}
+
+// --- Timer Edit ---
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function parseTime(str) {
+  if (!/^\d+:\d{1,2}$/.test(str)) return null;
+  const [m, s] = str.split(':').map(Number);
+  if (s >= 60) return null;
+  return m * 60 + s;
+}
+
+function renderTimerList() {
+  const list = document.getElementById('timer-list');
+  const count = document.getElementById('timer-count');
+  if (!list || !count) return;
+  count.textContent = `共 ${currentBeeps.length} 個 timer`;
+  list.innerHTML = '';
+  if (currentBeeps.length === 0) {
+    list.innerHTML = '<li class="empty">尚無 timer，請新增或重新分析</li>';
+    return;
+  }
+  currentBeeps.forEach((t, i) => {
+    const li = document.createElement('li');
+    const timeEl = document.createElement('span');
+    timeEl.className = 'timer-time';
+    timeEl.textContent = formatTime(t);
+    timeEl.addEventListener('click', () => {
+      if (ytPlayer && typeof ytPlayer.seekTo === 'function') {
+        ytPlayer.seekTo(t, true);
+      }
+    });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'delete-btn';
+    delBtn.textContent = '×';
+    delBtn.addEventListener('click', () => removeBeepAt(i));
+    li.appendChild(timeEl);
+    li.appendChild(delBtn);
+    list.appendChild(li);
+  });
+}
+
+function updateAddCurrentLabel() {
+  const btn = document.getElementById('add-current-btn');
+  if (!btn) return;
+  const t = (ytPlayer && typeof ytPlayer.getCurrentTime === 'function')
+    ? ytPlayer.getCurrentTime()
+    : 0;
+  btn.textContent = `在 ${formatTime(t)} 新增`;
+}
+
+function addBeep(t) {
+  const rounded = Math.round(t * 100) / 100;
+  if (currentBeeps.some((b) => Math.abs(b - rounded) < 0.005)) return;
+  setBeeps([...currentBeeps, rounded]);
+  persistCurrentBeeps();
+}
+
+function removeBeepAt(i) {
+  setBeeps(currentBeeps.filter((_, idx) => idx !== i));
+  persistCurrentBeeps();
+}
+
+function persistCurrentBeeps() {
+  if (!currentVideoId) return;
+  const record = Storage.load(currentVideoId);
+  if (!record) return;
+  Storage.save(currentVideoId, { ...record, beeps: [...currentBeeps] });
+  renderHistory();
+}
+
+function handleManualAdd() {
+  const input = document.getElementById('manual-time-input');
+  input.classList.remove('invalid');
+  const t = parseTime(input.value.trim());
+  if (t === null) {
+    input.classList.add('invalid');
+    document.getElementById('status-msg').textContent = '時間格式錯誤，請輸入 mm:ss（例如 1:23）';
+    return;
+  }
+  addBeep(t);
+  input.value = '';
 }
 
 // --- DOM Events ---
@@ -239,5 +330,16 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       ytPlayer.playVideo();
     }
+  });
+
+  document.getElementById('add-current-btn').addEventListener('click', () => {
+    if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
+    addBeep(ytPlayer.getCurrentTime());
+  });
+
+  document.getElementById('add-manual-btn').addEventListener('click', handleManualAdd);
+
+  document.getElementById('manual-time-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleManualAdd();
   });
 });
