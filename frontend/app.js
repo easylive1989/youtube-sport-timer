@@ -173,7 +173,10 @@ function renderHistory() {
     const safeId = item.video_id.replace(/[^A-Za-z0-9_-]/g, '');
     li.innerHTML = `
       <span class="title">${escapeHtml(item.title || item.video_id)}</span>
-      <button class="delete-btn" onclick="event.stopPropagation(); deleteFromHistory('${safeId}')">刪除</button>
+      <div class="history-actions">
+        <button class="share-tile-btn" onclick="event.stopPropagation(); shareHistory('${safeId}', this)">分享</button>
+        <button class="delete-btn" onclick="event.stopPropagation(); deleteFromHistory('${safeId}')">刪除</button>
+      </div>
     `;
     li.style.cursor = 'pointer';
     li.addEventListener('click', () => loadFromHistory(safeId));
@@ -188,6 +191,19 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function shareHistory(videoId, btn) {
+  const item = Storage.load(videoId);
+  if (!item) return;
+  const params = new URLSearchParams({ v: videoId });
+  if (item.beeps?.length > 0) params.set('t', item.beeps.join(','));
+  const url = `${location.origin}${location.pathname}?${params.toString()}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const original = btn.textContent;
+    btn.textContent = '已複製！';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  });
 }
 
 function loadFromHistory(videoId) {
@@ -332,15 +348,6 @@ document.addEventListener('DOMContentLoaded', () => {
     showPlayer(urlVideoId);
     renderHistory();
   }
-
-  document.getElementById('share-btn').addEventListener('click', () => {
-    navigator.clipboard.writeText(window.location.href).then(() => {
-      const btn = document.getElementById('share-btn');
-      const original = btn.textContent;
-      btn.textContent = '已複製！';
-      setTimeout(() => { btn.textContent = original; }, 1500);
-    });
-  });
 
   document.getElementById('load-btn').addEventListener('click', () => {
     const url = document.getElementById('url-input').value.trim();
