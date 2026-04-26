@@ -365,6 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     statusMsg.textContent = '';
+    document.getElementById('url-input').value = '';
     if (!audioCtx) audioCtx = new AudioContext();
 
     const existing = Storage.load(videoId);
