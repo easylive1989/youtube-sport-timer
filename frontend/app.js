@@ -27,7 +27,7 @@ function initPlayer(videoId) {
   }
   ytPlayer = new YT.Player('youtube-player', {
     videoId,
-    playerVars: { rel: 0, modestbranding: 1 },
+    playerVars: { mute: 1, rel: 0, modestbranding: 1 },
     events: { onStateChange: onPlayerStateChange },
   });
 }
