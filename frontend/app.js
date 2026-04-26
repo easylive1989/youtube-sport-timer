@@ -29,7 +29,18 @@ function initPlayer(videoId) {
     videoId,
     playerVars: { mute: 1, rel: 0, modestbranding: 1 },
     events: {
-      onReady: (e) => { e.target.mute(); e.target.setVolume(0); },
+      onReady: (e) => {
+        e.target.mute();
+        e.target.setVolume(0);
+        const title = e.target.getVideoData()?.title;
+        if (title && currentVideoId) {
+          const record = Storage.load(currentVideoId);
+          if (record && !record.title) {
+            Storage.save(currentVideoId, { ...record, title });
+            renderHistory();
+          }
+        }
+      },
       onStateChange: onPlayerStateChange,
     },
   });
