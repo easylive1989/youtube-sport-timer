@@ -8,6 +8,8 @@ let lastKnownTime = 0;
 let audioCtx = null;
 let beepVolume = 0.6;
 let currentVideoId = null;
+let expandedBeepTime = null;
+let loopFormDraft = { time: null, interval: '', count: '' };
 
 // --- YouTube IFrame API callback (must be global) ---
 window.onYouTubeIframeAPIReady = function () {
@@ -225,6 +227,13 @@ function setBeeps(beeps) {
   currentBeeps = [...beeps].sort((a, b) => a - b);
   playedBeepIndices.clear();
   lastKnownTime = 0;
+  if (
+    expandedBeepTime !== null &&
+    !currentBeeps.some((b) => Math.abs(b - expandedBeepTime) < 0.005)
+  ) {
+    expandedBeepTime = null;
+    loopFormDraft = { time: null, interval: '', count: '' };
+  }
   renderTimerList();
   updateAddCurrentLabel();
   const t = (ytPlayer && typeof ytPlayer.getCurrentTime === 'function')
@@ -262,8 +271,17 @@ function renderTimerList() {
     list.innerHTML = '<li class="empty">新增一個 timer</li>';
     return;
   }
-  currentBeeps.forEach((t, i) => {
+  currentBeeps.forEach((t) => {
+    const isExpanded = expandedBeepTime !== null && Math.abs(expandedBeepTime - t) < 0.005;
+
     const li = document.createElement('li');
+    li.className = 'timer-item';
+    li.dataset.time = String(t);
+    if (isExpanded) li.classList.add('expanded');
+
+    const row = document.createElement('div');
+    row.className = 'timer-row';
+
     const timeEl = document.createElement('span');
     timeEl.className = 'timer-time';
     timeEl.textContent = formatTime(t);
@@ -272,27 +290,105 @@ function renderTimerList() {
         ytPlayer.seekTo(t, true);
       }
     });
+
     const actions = document.createElement('div');
     actions.className = 'timer-actions';
-    [5, 10, 20, 40].forEach((offset) => {
-      const btn = document.createElement('button');
-      btn.className = 'offset-btn';
-      btn.textContent = `+${offset}`;
-      btn.addEventListener('click', () => addBeep(t + offset));
-      actions.appendChild(btn);
-    });
+
+    const extendBtn = document.createElement('button');
+    extendBtn.className = 'extend-btn';
+    extendBtn.textContent = isExpanded ? '−' : '+';
+    extendBtn.setAttribute('aria-label', isExpanded ? '收起' : '展開');
+    extendBtn.addEventListener('click', () => toggleExtend(t));
+
     const delBtn = document.createElement('button');
     delBtn.className = 'delete-btn';
     delBtn.textContent = '×';
-    delBtn.addEventListener('click', () => removeBeepAt(i));
+    delBtn.addEventListener('click', () => removeBeepByTime(t));
+
+    actions.appendChild(extendBtn);
     actions.appendChild(delBtn);
-    li.appendChild(timeEl);
-    li.appendChild(actions);
+    row.appendChild(timeEl);
+    row.appendChild(actions);
+    li.appendChild(row);
+
+    const extend = document.createElement('div');
+    extend.className = 'timer-extend';
+    if (!isExpanded) extend.hidden = true;
+
+    const onceGroup = document.createElement('div');
+    onceGroup.className = 'extend-group extend-once';
+    const onceLabel = document.createElement('span');
+    onceLabel.className = 'extend-label';
+    onceLabel.textContent = '單次';
+    onceGroup.appendChild(onceLabel);
+    [5, 10, 20, 40].forEach((offset) => {
+      const b = document.createElement('button');
+      b.className = 'offset-btn';
+      b.textContent = `+${offset}`;
+      b.addEventListener('click', () => addBeep(t + offset));
+      onceGroup.appendChild(b);
+    });
+
+    const loopGroup = document.createElement('div');
+    loopGroup.className = 'extend-group extend-loop';
+    const loopLabel = document.createElement('span');
+    loopLabel.className = 'extend-label';
+    loopLabel.textContent = '循環';
+    const intervalInput = document.createElement('input');
+    intervalInput.type = 'number';
+    intervalInput.className = 'loop-interval';
+    intervalInput.min = '1';
+    intervalInput.step = '1';
+    intervalInput.inputMode = 'numeric';
+    intervalInput.placeholder = '秒';
+    const countInput = document.createElement('input');
+    countInput.type = 'number';
+    countInput.className = 'loop-count';
+    countInput.min = '1';
+    countInput.step = '1';
+    countInput.inputMode = 'numeric';
+    countInput.placeholder = '次';
+    if (isExpanded && loopFormDraft.time !== null && Math.abs(loopFormDraft.time - t) < 0.005) {
+      intervalInput.value = loopFormDraft.interval;
+      countInput.value = loopFormDraft.count;
+    }
+    intervalInput.addEventListener('input', () => {
+      loopFormDraft = { time: t, interval: intervalInput.value, count: countInput.value };
+    });
+    countInput.addEventListener('input', () => {
+      loopFormDraft = { time: t, interval: intervalInput.value, count: countInput.value };
+    });
+    const loopAddBtn = document.createElement('button');
+    loopAddBtn.className = 'loop-add-btn';
+    loopAddBtn.textContent = '新增';
+    loopAddBtn.addEventListener('click', () => {
+      addLoopBeeps(t, intervalInput.value, countInput.value, loopAddBtn);
+    });
+    loopGroup.appendChild(loopLabel);
+    loopGroup.appendChild(intervalInput);
+    loopGroup.appendChild(countInput);
+    loopGroup.appendChild(loopAddBtn);
+
+    extend.appendChild(onceGroup);
+    extend.appendChild(loopGroup);
+    li.appendChild(extend);
+
     list.appendChild(li);
   });
 }
 
 function updateAddCurrentLabel() {}
+
+function toggleExtend(t) {
+  if (expandedBeepTime !== null && Math.abs(expandedBeepTime - t) < 0.005) {
+    expandedBeepTime = null;
+    loopFormDraft = { time: null, interval: '', count: '' };
+  } else {
+    expandedBeepTime = t;
+    loopFormDraft = { time: t, interval: '', count: '' };
+  }
+  renderTimerList();
+}
 
 function addBeep(t) {
   const rounded = Math.round(t * 100) / 100;
@@ -301,9 +397,42 @@ function addBeep(t) {
   persistCurrentBeeps();
 }
 
-function removeBeepAt(i) {
-  setBeeps(currentBeeps.filter((_, idx) => idx !== i));
+function removeBeepByTime(t) {
+  if (expandedBeepTime !== null && Math.abs(expandedBeepTime - t) < 0.005) {
+    expandedBeepTime = null;
+    loopFormDraft = { time: null, interval: '', count: '' };
+  }
+  setBeeps(currentBeeps.filter((b) => Math.abs(b - t) >= 0.005));
   persistCurrentBeeps();
+}
+
+function removeBeepAt(i) {
+  const t = currentBeeps[i];
+  if (t === undefined) return;
+  removeBeepByTime(t);
+}
+
+function addLoopBeeps(baseT, intervalRaw, countRaw, btn) {
+  const interval = Number(intervalRaw);
+  const count = Number(countRaw);
+  if (!Number.isFinite(interval) || !Number.isFinite(count) || interval <= 0 || count <= 0) {
+    flashLoopError(btn);
+    return;
+  }
+  const safeCount = Math.min(Math.floor(count), 200);
+  for (let n = 1; n <= safeCount; n++) {
+    addBeep(baseT + interval * n);
+  }
+}
+
+function flashLoopError(btn) {
+  const original = btn.textContent;
+  btn.textContent = '無效';
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.disabled = false;
+  }, 800);
 }
 
 function persistCurrentBeeps() {

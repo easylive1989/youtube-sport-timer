@@ -215,11 +215,17 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 #timer-list li {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   background: #1a1a1a;
   padding: 6px 10px;
   border-radius: 4px;
+  gap: 6px;
+}
+
+#timer-list .timer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 #timer-list .timer-time {
@@ -261,6 +267,57 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   background: #742a2a;
   flex-shrink: 0;
   margin-left: 8px;
+}
+
+#timer-list .extend-btn {
+  padding: 4px 10px;
+  font-size: 13px;
+  background: #276749;
+  color: #fff;
+  flex-shrink: 0;
+  min-width: 32px;
+}
+
+#timer-list li.expanded .extend-btn {
+  background: #1f5236;
+}
+
+#timer-list .timer-extend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid #2a2a2a;
+}
+
+#timer-list .extend-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+#timer-list .extend-label {
+  font-size: 11px;
+  color: #888;
+  min-width: 28px;
+}
+
+#timer-list .extend-loop input {
+  width: 56px;
+  padding: 4px 6px;
+  font-size: 12px;
+  background: #222;
+  color: #eee;
+  border: 1px solid #444;
+  border-radius: 4px;
+}
+
+#timer-list .extend-loop .loop-add-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #2c4a7c;
+  color: #fff;
 }
 
 /* Flash overlay */
@@ -320,7 +377,23 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     overflow-y: auto;
   }
 
-  #timer-list .offset-btn {
+  #timer-list .extend-once .offset-btn {
+    min-width: 30px;
+    padding: 3px 0;
+    font-size: 11px;
+  }
+
+  #timer-list .extend-loop input {
+    width: 44px;
+    font-size: 11px;
+  }
+
+  #timer-list .extend-loop .loop-add-btn {
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+
+  #timer-list .extend-label {
     display: none;
   }
 }
