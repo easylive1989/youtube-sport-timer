@@ -290,6 +290,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-top: 1px solid #2a2a2a;
 }
 
+#timer-list .timer-extend[hidden] {
+  display: none;
+}
+
 #timer-list .extend-group {
   display: flex;
   align-items: center;
