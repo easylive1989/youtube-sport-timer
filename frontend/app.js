@@ -10,10 +10,16 @@ let beepVolume = 0.6;
 let currentVideoId = null;
 let expandedBeepTime = null;
 let loopFormDraft = { time: null, interval: '', count: '' };
+let pendingVideoId = null;
 
 // --- YouTube IFrame API callback (must be global) ---
 window.onYouTubeIframeAPIReady = function () {
   renderHistory();
+  if (pendingVideoId) {
+    const id = pendingVideoId;
+    pendingVideoId = null;
+    initPlayer(id);
+  }
 };
 
 // Resume AudioContext when page comes back to foreground (mobile)
@@ -25,6 +31,10 @@ document.addEventListener('visibilitychange', () => {
 
 // --- Player ---
 function initPlayer(videoId) {
+  if (typeof YT === 'undefined' || typeof YT.Player !== 'function') {
+    pendingVideoId = videoId;
+    return;
+  }
   if (ytPlayer && typeof ytPlayer.destroy === 'function') {
     ytPlayer.destroy();
   }
