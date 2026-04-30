@@ -6,7 +6,11 @@ let timerIntervalId = null;
 let isPlaying = false;
 let lastKnownTime = 0;
 let audioCtx = null;
-let beepVolume = 0.6;
+const VOLUME_KEY = 'yst_volume';
+const savedVolume = parseFloat(localStorage.getItem(VOLUME_KEY));
+let beepVolume = Number.isFinite(savedVolume) && savedVolume >= 0.1 && savedVolume <= 1.0
+  ? savedVolume
+  : 0.6;
 let currentVideoId = null;
 let expandedBeepTime = null;
 let loopFormDraft = { time: null, interval: '', count: '' };
@@ -454,6 +458,15 @@ function persistCurrentBeeps() {
   updateURL();
 }
 
+function updateVolumeLabel() {
+  const label = document.getElementById('volume-label');
+  if (label) label.textContent = `${Math.round(beepVolume * 100)}%`;
+}
+
+function persistVolume() {
+  localStorage.setItem(VOLUME_KEY, String(beepVolume));
+}
+
 function updateURL() {
   if (!currentVideoId) return;
   const params = new URLSearchParams();
@@ -529,12 +542,18 @@ document.addEventListener('DOMContentLoaded', () => {
     addBeep(ytPlayer.getCurrentTime());
   });
 
+  updateVolumeLabel();
+
   document.getElementById('volume-down-btn').addEventListener('click', () => {
     beepVolume = Math.max(0.1, Math.round((beepVolume - 0.1) * 10) / 10);
+    persistVolume();
+    updateVolumeLabel();
   });
 
   document.getElementById('volume-up-btn').addEventListener('click', () => {
     beepVolume = Math.min(1.0, Math.round((beepVolume + 0.1) * 10) / 10);
+    persistVolume();
+    updateVolumeLabel();
   });
 
 

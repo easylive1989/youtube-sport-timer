@@ -185,12 +185,21 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   display: flex;
   gap: 4px;
   margin-left: auto;
+  align-items: center;
 }
 
 #volume-controls button {
   padding: 8px 10px;
   font-size: 13px;
   background: #444;
+}
+
+#volume-label {
+  font-size: 12px;
+  color: #aaa;
+  min-width: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 #add-current-btn {
