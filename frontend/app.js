@@ -633,6 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   seekerBar.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
     if (!ytPlayer || typeof ytPlayer.seekTo !== 'function' || videoDuration <= 0) return;
     e.preventDefault();
     isDragging = true;

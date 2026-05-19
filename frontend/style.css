@@ -102,6 +102,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   cursor: pointer;
   touch-action: none; /* let pointermove fire without page scroll on mobile */
   user-select: none;
+  transition: height 0.15s ease;
 }
 
 #seeker-track {
@@ -138,15 +139,28 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 @media (hover: hover) {
+  #seeker-bar:hover {
+    height: 24px;
+  }
   #seeker-bar:hover #seeker-track {
     background: rgba(255, 255, 255, 0.4);
   }
+}
+
+#seeker-bar:active {
+  height: 24px;
+}
+#seeker-bar:active #seeker-track {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 /* Landscape mobile: thinner bar */
 @media (orientation: landscape) and (max-height: 500px) {
   #seeker-bar {
     height: 16px;
+  }
+  #seeker-bar:active {
+    height: 20px;
   }
   #player-click-overlay {
     bottom: 16px;
