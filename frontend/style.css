@@ -74,7 +74,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   overflow: hidden;
 }
 
-#player-wrapper > div,
+#player-wrapper > #youtube-player,
 #player-wrapper iframe {
   position: absolute !important;
   top: 0 !important;
@@ -88,7 +88,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   inset: 0;
   z-index: 1;
   cursor: pointer;
-  /* leave bottom space for seeker bar (added in Task 2) */
+  /* reserve space for custom seeker bar */
   bottom: 20px;
 }
 
