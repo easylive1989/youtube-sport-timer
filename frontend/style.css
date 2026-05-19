@@ -127,6 +127,16 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   pointer-events: none;
 }
 
+.seeker-beep-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  margin-left: -2px; /* center on the time position */
+  background: #fbbf24;
+  pointer-events: none;
+}
+
 @media (hover: hover) {
   #seeker-bar:hover #seeker-track {
     background: rgba(255, 255, 255, 0.4);
@@ -140,6 +150,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   }
   #player-click-overlay {
     bottom: 16px;
+  }
+  .seeker-beep-marker {
+    width: 3px;
+    margin-left: -1.5px;
   }
 }
 

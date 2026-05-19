@@ -56,6 +56,7 @@ function initPlayer(videoId) {
         e.target.mute();
         e.target.setVolume(0);
         videoDuration = e.target.getDuration() || 0;
+        renderSeekerBeepMarkers();
         const title = e.target.getVideoData()?.title;
         if (title && currentVideoId) {
           const record = Storage.load(currentVideoId);
@@ -167,6 +168,20 @@ function seekerTimeFromPointer(clientX) {
   const rect = bar.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
   return ratio * videoDuration;
+}
+
+function renderSeekerBeepMarkers() {
+  const container = document.getElementById('seeker-beep-markers');
+  if (!container) return;
+  container.innerHTML = '';
+  if (videoDuration <= 0 || currentBeeps.length === 0) return;
+  currentBeeps.forEach((t) => {
+    if (t < 0 || t > videoDuration) return;
+    const marker = document.createElement('div');
+    marker.className = 'seeker-beep-marker';
+    marker.style.left = `${(t / videoDuration) * 100}%`;
+    container.appendChild(marker);
+  });
 }
 
 function applyDragSeek() {
@@ -287,6 +302,7 @@ function setBeeps(beeps) {
   const t = (ytPlayer && typeof ytPlayer.getCurrentTime === 'function')
     ? ytPlayer.getCurrentTime() : 0;
   updateCountdown(t);
+  renderSeekerBeepMarkers();
 }
 
 function showPlayer(videoId) {
