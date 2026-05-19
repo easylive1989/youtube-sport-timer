@@ -15,6 +15,8 @@ let currentVideoId = null;
 let expandedBeepTime = null;
 let loopFormDraft = { time: null, interval: '', count: '' };
 let pendingVideoId = null;
+let videoDuration = 0;
+let isDragging = false;
 
 // --- YouTube IFrame API callback (must be global) ---
 window.onYouTubeIframeAPIReady = function () {
@@ -39,6 +41,7 @@ function initPlayer(videoId) {
     pendingVideoId = videoId;
     return;
   }
+  videoDuration = 0;
   if (ytPlayer && typeof ytPlayer.destroy === 'function') {
     ytPlayer.destroy();
   }
@@ -49,6 +52,7 @@ function initPlayer(videoId) {
       onReady: (e) => {
         e.target.mute();
         e.target.setVolume(0);
+        videoDuration = e.target.getDuration() || 0;
         const title = e.target.getVideoData()?.title;
         if (title && currentVideoId) {
           const record = Storage.load(currentVideoId);
@@ -120,6 +124,7 @@ function tick() {
 
   updateCountdown(currentTime);
   updateAddCurrentLabel();
+  updateSeekerFill(currentTime);
 }
 
 function updateCountdown(currentTime) {
@@ -143,6 +148,14 @@ function updateCountdown(currentTime) {
 
   fill.style.width = `${fraction * 100}%`;
   label.textContent = `${Math.ceil(timeToNext)}s`;
+}
+
+function updateSeekerFill(currentTime) {
+  if (isDragging || videoDuration <= 0) return;
+  const fill = document.getElementById('seeker-fill');
+  if (!fill) return;
+  const pct = Math.max(0, Math.min(100, (currentTime / videoDuration) * 100));
+  fill.style.width = `${pct}%`;
 }
 
 // --- Audio + Visual ---
@@ -263,6 +276,8 @@ function showPlayer(videoId) {
   isPlaying = false;
   document.getElementById('countdown-fill').style.width = '0%';
   document.getElementById('next-beep-label').textContent = '--';
+  const seekerFill = document.getElementById('seeker-fill');
+  if (seekerFill) seekerFill.style.width = '0%';
   updateURL();
   initPlayer(videoId);
 }
