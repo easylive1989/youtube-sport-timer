@@ -92,6 +92,55 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   bottom: 20px;
 }
 
+#seeker-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 20px;
+  z-index: 2;
+  cursor: pointer;
+  touch-action: none; /* let pointermove fire without page scroll on mobile */
+  user-select: none;
+}
+
+#seeker-track {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.25);
+  transition: background 0.15s ease;
+}
+
+#seeker-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: linear-gradient(90deg, #e53e3e, #fc8181);
+  pointer-events: none;
+}
+
+#seeker-beep-markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#seeker-bar:hover #seeker-track {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* Landscape mobile: thinner bar */
+@media (orientation: landscape) and (max-height: 500px) {
+  #seeker-bar {
+    height: 16px;
+  }
+  #player-click-overlay {
+    bottom: 16px;
+  }
+}
+
 #timer-row {
   display: flex;
   align-items: center;
