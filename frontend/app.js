@@ -158,6 +158,14 @@ function updateSeekerFill(currentTime) {
   fill.style.width = `${pct}%`;
 }
 
+function seekerTimeFromPointer(clientX) {
+  const bar = document.getElementById('seeker-bar');
+  if (!bar || videoDuration <= 0) return null;
+  const rect = bar.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  return ratio * videoDuration;
+}
+
 // --- Audio + Visual ---
 async function playBeep() {
   if (!audioCtx) audioCtx = new AudioContext();
@@ -579,6 +587,18 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       ytPlayer.playVideo();
     }
+  });
+
+  const seekerBar = document.getElementById('seeker-bar');
+  seekerBar.addEventListener('click', (e) => {
+    e.stopPropagation(); // don't let it bubble to player-click-overlay
+    if (!ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
+    const t = seekerTimeFromPointer(e.clientX);
+    if (t === null) return;
+    ytPlayer.seekTo(t, true);
+    // Update fill immediately so user sees response before next tick
+    const fill = document.getElementById('seeker-fill');
+    if (fill) fill.style.width = `${(t / videoDuration) * 100}%`;
   });
 
 });
