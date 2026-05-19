@@ -83,6 +83,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   height: 100% !important;
 }
 
+#player-click-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: pointer;
+  /* leave bottom space for seeker bar (added in Task 2) */
+  bottom: 20px;
+}
+
 #timer-row {
   display: flex;
   align-items: center;

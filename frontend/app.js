@@ -44,7 +44,7 @@ function initPlayer(videoId) {
   }
   ytPlayer = new YT.Player('youtube-player', {
     videoId,
-    playerVars: { mute: 1, rel: 0, modestbranding: 1 },
+    playerVars: { mute: 1, rel: 0, modestbranding: 1, controls: 0 },
     events: {
       onReady: (e) => {
         e.target.mute();
@@ -556,5 +556,14 @@ document.addEventListener('DOMContentLoaded', () => {
     updateVolumeLabel();
   });
 
+  document.getElementById('player-click-overlay').addEventListener('click', () => {
+    if (!ytPlayer || typeof ytPlayer.getPlayerState !== 'function') return;
+    const state = ytPlayer.getPlayerState();
+    if (state === YT.PlayerState.PLAYING) {
+      ytPlayer.pauseVideo();
+    } else {
+      ytPlayer.playVideo();
+    }
+  });
 
 });
