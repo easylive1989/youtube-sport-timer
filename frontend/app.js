@@ -17,6 +17,9 @@ let loopFormDraft = { time: null, interval: '', count: '' };
 let pendingVideoId = null;
 let videoDuration = 0;
 let isDragging = false;
+let dragWasPlaying = false;
+let dragRafPending = false;
+let dragLatestTime = 0;
 
 // --- YouTube IFrame API callback (must be global) ---
 window.onYouTubeIframeAPIReady = function () {
@@ -164,6 +167,16 @@ function seekerTimeFromPointer(clientX) {
   const rect = bar.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
   return ratio * videoDuration;
+}
+
+function applyDragSeek() {
+  dragRafPending = false;
+  if (!isDragging || !ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
+  ytPlayer.seekTo(dragLatestTime, true);
+  const fill = document.getElementById('seeker-fill');
+  if (fill && videoDuration > 0) {
+    fill.style.width = `${(dragLatestTime / videoDuration) * 100}%`;
+  }
 }
 
 // --- Audio + Visual ---
@@ -591,14 +604,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const seekerBar = document.getElementById('seeker-bar');
   seekerBar.addEventListener('click', (e) => {
-    e.stopPropagation(); // don't let it bubble to player-click-overlay
+    e.stopPropagation();
+    if (isDragging) return; // shouldn't happen, but guard
     if (!ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
     const t = seekerTimeFromPointer(e.clientX);
     if (t === null) return;
     ytPlayer.seekTo(t, true);
-    // Update fill immediately so user sees response before next tick
     const fill = document.getElementById('seeker-fill');
-    if (fill) fill.style.width = `${(t / videoDuration) * 100}%`;
+    if (fill && videoDuration > 0) {
+      fill.style.width = `${(t / videoDuration) * 100}%`;
+    }
   });
+
+  seekerBar.addEventListener('pointerdown', (e) => {
+    if (!ytPlayer || typeof ytPlayer.seekTo !== 'function' || videoDuration <= 0) return;
+    e.preventDefault();
+    isDragging = true;
+    dragWasPlaying = ytPlayer.getPlayerState() === YT.PlayerState.PLAYING;
+    if (dragWasPlaying) ytPlayer.pauseVideo();
+    seekerBar.setPointerCapture(e.pointerId);
+    const t = seekerTimeFromPointer(e.clientX);
+    if (t !== null) {
+      dragLatestTime = t;
+      if (!dragRafPending) {
+        dragRafPending = true;
+        requestAnimationFrame(applyDragSeek);
+      }
+    }
+  });
+
+  seekerBar.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    const t = seekerTimeFromPointer(e.clientX);
+    if (t === null) return;
+    dragLatestTime = t;
+    // Update fill immediately for smooth visual feedback (cheap)
+    const fill = document.getElementById('seeker-fill');
+    if (fill && videoDuration > 0) {
+      fill.style.width = `${(t / videoDuration) * 100}%`;
+    }
+    // Throttle the actual seekTo call to once per frame
+    if (!dragRafPending) {
+      dragRafPending = true;
+      requestAnimationFrame(applyDragSeek);
+    }
+  });
+
+  function endDrag(e) {
+    if (!isDragging) return;
+    isDragging = false;
+    try { seekerBar.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (dragWasPlaying && ytPlayer && typeof ytPlayer.playVideo === 'function') {
+      ytPlayer.playVideo();
+    }
+    dragWasPlaying = false;
+  }
+
+  seekerBar.addEventListener('pointerup', endDrag);
+  seekerBar.addEventListener('pointercancel', endDrag);
 
 });
