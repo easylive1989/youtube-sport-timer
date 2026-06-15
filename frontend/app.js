@@ -11,6 +11,20 @@ const savedVolume = parseFloat(localStorage.getItem(VOLUME_KEY));
 let beepVolume = Number.isFinite(savedVolume) && savedVolume >= 0.1 && savedVolume <= 1.0
   ? savedVolume
   : 0.6;
+
+// Volume level index (0–9) mapped to a logarithmic gain curve
+// so each step is a consistent perceptual jump (~3 dB)
+const VOLUME_LEVELS = [0.1, 0.14, 0.2, 0.28, 0.4, 0.55, 0.7, 0.82, 0.92, 1.0];
+function closestVolumeIndex(v) {
+  let best = 0;
+  let bestDist = Math.abs(VOLUME_LEVELS[0] - v);
+  for (let i = 1; i < VOLUME_LEVELS.length; i++) {
+    const d = Math.abs(VOLUME_LEVELS[i] - v);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return best;
+}
+let volumeIndex = closestVolumeIndex(beepVolume);
 let currentVideoId = null;
 let expandedBeepTime = null;
 let loopFormDraft = { time: null, interval: '', count: '' };
@@ -512,7 +526,7 @@ function persistCurrentBeeps() {
 
 function updateVolumeLabel() {
   const label = document.getElementById('volume-label');
-  if (label) label.textContent = `${Math.round(beepVolume * 100)}%`;
+  if (label) label.textContent = `${volumeIndex + 1}/10`;
 }
 
 function persistVolume() {
@@ -597,15 +611,21 @@ document.addEventListener('DOMContentLoaded', () => {
   updateVolumeLabel();
 
   document.getElementById('volume-down-btn').addEventListener('click', () => {
-    beepVolume = Math.max(0.1, Math.round((beepVolume - 0.1) * 10) / 10);
-    persistVolume();
-    updateVolumeLabel();
+    if (volumeIndex > 0) {
+      volumeIndex--;
+      beepVolume = VOLUME_LEVELS[volumeIndex];
+      persistVolume();
+      updateVolumeLabel();
+    }
   });
 
   document.getElementById('volume-up-btn').addEventListener('click', () => {
-    beepVolume = Math.min(1.0, Math.round((beepVolume + 0.1) * 10) / 10);
-    persistVolume();
-    updateVolumeLabel();
+    if (volumeIndex < VOLUME_LEVELS.length - 1) {
+      volumeIndex++;
+      beepVolume = VOLUME_LEVELS[volumeIndex];
+      persistVolume();
+      updateVolumeLabel();
+    }
   });
 
   document.getElementById('player-click-overlay').addEventListener('click', () => {
