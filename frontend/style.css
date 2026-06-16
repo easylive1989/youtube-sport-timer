@@ -228,17 +228,31 @@ body{
   .stage{
     grid-template-columns:minmax(0,1.55fr) minmax(280px,1fr);
     grid-template-areas:"video timer";
+    align-items:stretch;       /* 影片與計時器同列等高 */
     align-content:center;
     max-width:1280px;
   }
-  .video{ height:auto; align-self:center; max-height:78vh; margin-inline:0; }
+  /* 影片以 16:9 撐出整列高度，作為高度基準 */
+  .video{
+    height:auto; width:100%; aspect-ratio:16/9;
+    align-self:stretch; max-height:78vh; margin-inline:0;
+  }
+  /* 計時器卡片 stretch 對齊到影片高度；min-height/overflow 讓內容不會反過來把列撐高 */
   .timer{
     background:var(--surface); border:1px solid var(--line);
     border-radius:var(--r-lg); padding:clamp(18px,2.4vw,32px);
     align-self:stretch; justify-content:center;
+    min-height:0; overflow:hidden;
+    gap:clamp(10px,1.6vh,20px);
   }
-  .ring-wrap{ width:min(34vmin,300px); }
-  .count{ font-size:clamp(3.4rem,13vmin,7rem); }
+  /* 圓環改用 flex 收縮，依卡片剩餘高度自適應，避免超出影片高度 */
+  .timer .ring-wrap{
+    width:auto; height:auto;
+    flex:1 1 0; min-height:0;
+    max-width:min(34vmin,300px);
+    aspect-ratio:1; margin-inline:auto;
+  }
+  .count{ font-size:clamp(3rem,11vmin,6.4rem); }
 }
 
 /* phase pulse */
