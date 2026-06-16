@@ -1,703 +1,629 @@
-// --- State ---
-let ytPlayer = null;
-let currentBeeps = [];
-let playedBeepIndices = new Set();
-let timerIntervalId = null;
-let isPlaying = false;
-let lastKnownTime = 0;
-let audioCtx = null;
-const VOLUME_KEY = 'yst_volume';
-const savedVolume = parseFloat(localStorage.getItem(VOLUME_KEY));
-let beepVolume = Number.isFinite(savedVolume) && savedVolume >= 0.1 && savedVolume <= 1.0
-  ? savedVolume
-  : 0.6;
+(function(){
+  "use strict";
 
-// Volume level index (0–9) mapped to a logarithmic gain curve
-// so each step is a consistent perceptual jump (~3 dB)
-const VOLUME_LEVELS = [0.1, 0.14, 0.2, 0.28, 0.4, 0.55, 0.7, 0.82, 0.92, 1.0];
-function closestVolumeIndex(v) {
-  let best = 0;
-  let bestDist = Math.abs(VOLUME_LEVELS[0] - v);
-  for (let i = 1; i < VOLUME_LEVELS.length; i++) {
-    const d = Math.abs(VOLUME_LEVELS[i] - v);
-    if (d < bestDist) { bestDist = d; best = i; }
-  }
-  return best;
-}
-let volumeIndex = closestVolumeIndex(beepVolume);
-let currentVideoId = null;
-let expandedBeepTime = null;
-let loopFormDraft = { time: null, interval: '', count: '' };
-let pendingVideoId = null;
-let videoDuration = 0;
-let isDragging = false;
-let dragWasPlaying = false;
-let dragRafPending = false;
-let dragLatestTime = 0;
+  /* ============================================================
+     運動節奏計時器 — 核心引擎
+     資料模型：TS = 時間點陣列（秒）。
+       phases[0] = 準備（0 → TS[0]）
+       之後每個 TS 區間交替為 運動 / 休息
+       （奇數點開始運動、偶數點開始休息）
+     每支影片的時間點存於 Storage（per-video），key = video id。
+     ============================================================ */
 
-// --- YouTube IFrame API callback (must be global) ---
-window.onYouTubeIframeAPIReady = function () {
-  renderHistory();
-  if (pendingVideoId) {
-    const id = pendingVideoId;
-    pendingVideoId = null;
-    initPlayer(id);
-  }
-};
+  /* ---------- config / params ---------- */
+  var DEFAULT_VIDEO = "LmrKejHOaG4";
+  var DEFAULT_TS = [40.49,85.09,100.59,145.56,160.59,205.56,220.59,265.56,280.59,325.56,
+    340.59,385.56,400.59,445.56,460.59,505.56,520.59,565.56,580.59,625.56,640.59,685.56,
+    700.59,745.56,760.59,805.56,820.59,865.56,880.59,925.56,940.59,985.56,1000.59,1045.56,
+    1060.59,1105.56,1120.59,1165.56,1180.59,1225.56,1240.59];
 
-// Resume AudioContext when page comes back to foreground (mobile)
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-});
+  var params = new URLSearchParams(location.search);
+  function ls(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 
-// --- Player ---
-function initPlayer(videoId) {
-  if (typeof YT === 'undefined' || typeof YT.Player !== 'function') {
-    pendingVideoId = videoId;
-    return;
+  var urlV = params.get("v"), urlT = params.get("t");
+  var VIDEO = (urlV && urlV.trim()) ? urlV.trim() : (ls("yst-video") || DEFAULT_VIDEO);
+
+  var TS = null;
+  if (urlT && urlT.indexOf(",") !== -1){
+    var a = urlT.split(",").map(function(s){return parseFloat(s);}).filter(function(x){return isFinite(x);});
+    if (a.length >= 2) TS = a;
   }
-  videoDuration = 0;
-  if (ytPlayer && typeof ytPlayer.destroy === 'function') {
-    ytPlayer.destroy();
+  // 其次：該影片在 Storage 內既有的時間點
+  if (!TS){
+    try{
+      var rec = Storage.load(VIDEO);
+      if (rec && Array.isArray(rec.beeps) && rec.beeps.length >= 2) TS = rec.beeps.slice();
+    }catch(e){}
   }
-  ytPlayer = new YT.Player('youtube-player', {
-    videoId,
-    playerVars: { mute: 1, rel: 0, modestbranding: 1, controls: 0 },
-    events: {
-      onReady: (e) => {
-        e.target.mute();
-        e.target.setVolume(0);
-        videoDuration = e.target.getDuration() || 0;
-        renderSeekerBeepMarkers();
-        const title = e.target.getVideoData()?.title;
-        if (title && currentVideoId) {
-          const record = Storage.load(currentVideoId);
-          if (record && !record.title) {
-            Storage.save(currentVideoId, { ...record, title });
-            renderHistory();
+  if (!TS) TS = DEFAULT_TS.slice();
+
+  var level = 6; var _lv = parseInt(ls("yst-vol"),10); if (!isNaN(_lv) && _lv>=0 && _lv<=10) level = _lv;
+  var masterVol = level/10;
+
+  var phases = [], W = 0, TOTAL_WORK = 0, T_START = 0, T_END = 0;
+
+  /* ---------- elements ---------- */
+  var app = document.getElementById("app");
+  var elPhase = document.getElementById("phaseLabel");
+  var elRep   = document.getElementById("rep");
+  var elCount = document.getElementById("count");
+  var elNext  = document.getElementById("next");
+  var elRing  = document.getElementById("ringProg");
+  var elElapsed = document.getElementById("elapsed");
+  var elProgress = document.getElementById("progress");
+  var elProgressTrack = document.getElementById("progressTrack");
+  var elProgressThumb = document.getElementById("progressThumb");
+  var startBtn = document.getElementById("startBtn");
+  var playBtn  = document.getElementById("playBtn");
+  var beepBtn  = document.getElementById("beepBtn");
+
+  var RING_C = 2 * Math.PI * 86;
+  elRing.style.strokeDasharray = RING_C.toFixed(1);
+  elRing.style.strokeDashoffset = RING_C.toFixed(1);
+
+  /* segmented progress bar + phase rebuild */
+  var segEls = [];
+  function buildProgress(){
+    elProgress.innerHTML = "";
+    segEls = [];
+    var span = (T_END - T_START) || 1;
+    for (var k=1; k<TS.length; k++){
+      var d = TS[k]-TS[k-1];
+      var isWork = ((k-1)%2===0);
+      var seg = document.createElement("div");
+      seg.className = "pseg " + (isWork?"work":"rest");
+      seg.style.flex = (d/span).toFixed(4) + " 1 0";
+      var fill = document.createElement("div");
+      fill.className = "fill";
+      seg.appendChild(fill);
+      elProgress.appendChild(seg);
+      segEls.push({el:seg, fill:fill, start:TS[k-1], end:TS[k]});
+    }
+  }
+  function rebuild(){
+    TS = TS.filter(function(x){return isFinite(x) && x>=0;}).sort(function(a,b){return a-b;});
+    phases = []; W = 0;
+    if (TS.length>0){
+      phases.push({type:"ready", start:0, end:TS[0], workNo:0});
+      for (var i=1; i<TS.length; i++){
+        var isWork = ((i-1)%2===0); if (isWork) W++;
+        phases.push({type:isWork?"work":"rest", start:TS[i-1], end:TS[i], workNo:W});
+      }
+    }
+    TOTAL_WORK = W;
+    T_START = TS.length ? TS[0] : 0;
+    T_END = TS.length ? TS[TS.length-1] : 0;
+    buildProgress();
+    if (typeof renderTimers === "function") renderTimers();
+    prevIdx = -99; lastBeepR = -1;
+    var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
+    var tc = document.getElementById("tCount"); if (tc) tc.textContent = TS.length;
+  }
+
+  /* ---------- audio ---------- */
+  var actx = null, beepOn = true;
+  function ensureAudio(){
+    if (!actx){
+      try { actx = new (window.AudioContext||window.webkitAudioContext)(); }
+      catch(e){ return; }
+    }
+    if (actx.state === "suspended") actx.resume();
+  }
+  function tone(freq, dur, when, type, gainVal){
+    if (!actx || !beepOn || masterVol<=0) return;
+    var t0 = actx.currentTime + (when||0);
+    var o = actx.createOscillator(), g = actx.createGain();
+    o.type = type||"sine"; o.frequency.value = freq;
+    o.connect(g); g.connect(actx.destination);
+    var peak = Math.max(0.0002, (gainVal||0.18) * masterVol);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(peak, t0+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    o.start(t0); o.stop(t0+dur+0.03);
+  }
+  function beepCount(){ tone(880,0.12,0,"square",0.16); }                 // 3-2-1
+  function cueWork(){ tone(1318,0.16,0,"sawtooth",0.20); tone(1760,0.20,0.14,"sawtooth",0.18); } // bright rising
+  function cueRest(){ tone(523,0.40,0,"sine",0.18); }                     // mellow low
+  function cueDone(){ [659,880,1175,1568].forEach(function(f,i){ tone(f,0.24,i*0.16,"triangle",0.17); }); }
+
+  /* ---------- youtube player ---------- */
+  var player=null, playerReady=false, playerOk=false;
+  // 影片本身完全靜音：只靠 app 產生的提示音來提示換動作
+  function muteVideo(){
+    try{ player.mute(); player.setVolume(0); }catch(e){}
+  }
+  // 取得影片標題並存入該影片的歷史紀錄（供歷史清單顯示真實標題）
+  function captureTitle(){
+    try{
+      var data = player.getVideoData && player.getVideoData();
+      var title = data && data.title;
+      if (!title) return;
+      var rec = Storage.load(VIDEO);
+      if (rec && !rec.title){
+        Storage.save(VIDEO, Object.assign({}, rec, { title: title }));
+        if (typeof renderHistory === "function") renderHistory();
+      }
+    }catch(e){}
+  }
+  window.onYouTubeIframeAPIReady = function(){
+    try{
+      player = new YT.Player("player", {
+        videoId: VIDEO,
+        playerVars:{ mute:1, controls:0, modestbranding:1, rel:0, playsinline:1, iv_load_policy:3, fs:0, disablekb:1 },
+        events:{
+          onReady:function(){
+            playerReady=true; playerOk=true;
+            muteVideo();
+            captureTitle();
+            if (restoreTime>1){ try{ player.seekTo(restoreTime,true); player.pauseVideo(); }catch(e){} }
+          },
+          onError:function(){ playerOk=false; },
+          onStateChange:function(e){
+            if (e.data === YT.PlayerState.PLAYING){ muteVideo(); captureTitle(); setPlaying(true,true); }
+            else if (e.data === YT.PlayerState.PAUSED){ setPlaying(false,true); }
+            else if (e.data === YT.PlayerState.ENDED){ setPlaying(false,true); }
           }
         }
-      },
-      onStateChange: onPlayerStateChange,
-    },
-  });
-}
+      });
+    }catch(e){ playerOk=false; }
+  };
 
-function onPlayerStateChange(event) {
-  if (event.data === YT.PlayerState.PLAYING && !isPlaying) {
-    isPlaying = true;
-    event.target.mute();
-    event.target.setVolume(0);
-    startTicker();
-  } else if (
-    (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) &&
-    isPlaying
-  ) {
-    isPlaying = false;
-    stopTicker();
-  }
-}
+  /* ---------- engine state ---------- */
+  var clock = 0, playing = false, started = false;
+  var prevIdx = -99, lastBeepR = -1;
+  var lastSave = 0;
+  var restoreTime = 0;
 
-// --- Timer ---
-function startTicker() {
-  if (timerIntervalId) clearInterval(timerIntervalId);
-  timerIntervalId = setInterval(tick, 100);
-}
+  function usingPlayer(){ return playerReady && playerOk && player && typeof player.getCurrentTime === "function"; }
 
-function stopTicker() {
-  if (timerIntervalId) {
-    clearInterval(timerIntervalId);
-    timerIntervalId = null;
-  }
-}
-
-function tick() {
-  if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
-
-  // Keep AudioContext alive on mobile (browsers suspend it in background)
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-
-  const currentTime = ytPlayer.getCurrentTime();
-
-  // Detect backward seek → allow already-played beeps to fire again
-  if (currentTime < lastKnownTime - 1.0) {
-    playedBeepIndices.clear();
-  }
-  lastKnownTime = currentTime;
-
-  // Fire beeps in window [beepTime - 0.05, beepTime + 0.15]
-  currentBeeps.forEach((beepTime, i) => {
-    if (
-      !playedBeepIndices.has(i) &&
-      currentTime >= beepTime - 0.05 &&
-      currentTime <= beepTime + 0.15
-    ) {
-      playedBeepIndices.add(i);
-      playBeep();
-      flashScreen();
+  function findPhase(t){
+    if (t >= T_END) return {idx: phases.length, done:true};
+    if (t < TS[0])  return {idx:0, phase:phases[0], done:false};
+    // segments live at phases[1..]
+    for (var k=1; k<phases.length; k++){
+      if (t < phases[k].end) return {idx:k, phase:phases[k], done:false};
     }
-  });
-
-  updateCountdown(currentTime);
-  updateAddCurrentLabel();
-  updateSeekerFill(currentTime);
-}
-
-function updateCountdown(currentTime) {
-  const nextIdx = currentBeeps.findIndex(
-    (t, i) => !playedBeepIndices.has(i) && t > currentTime
-  );
-  const fill = document.getElementById('countdown-fill');
-  const label = document.getElementById('next-beep-label');
-
-  if (nextIdx === -1) {
-    fill.style.width = '100%';
-    label.textContent = '--';
-    return;
+    return {idx:phases.length, done:true};
   }
 
-  const nextBeep = currentBeeps[nextIdx];
-  const prevBeep = nextIdx > 0 ? currentBeeps[nextIdx - 1] : 0;
-  const interval = nextBeep - prevBeep;
-  const timeToNext = nextBeep - currentTime;
-  const fraction = Math.max(0, Math.min(1, 1 - timeToNext / interval));
+  var PH_TEXT = { ready:"準備", work:"運動", rest:"休息", done:"完成" };
+  var PH_LIT = { ready:"oklch(0.84 0.155 92)", work:"oklch(0.70 0.185 42)", rest:"oklch(0.74 0.115 205)", done:"oklch(0.76 0.16 152)" };
 
-  fill.style.width = `${fraction * 100}%`;
-  label.textContent = `${Math.ceil(timeToNext)}s`;
-}
-
-function updateSeekerFill(currentTime) {
-  if (isDragging || videoDuration <= 0) return;
-  const fill = document.getElementById('seeker-fill');
-  if (!fill) return;
-  const pct = Math.max(0, Math.min(100, (currentTime / videoDuration) * 100));
-  fill.style.width = `${pct}%`;
-}
-
-function seekerTimeFromPointer(clientX) {
-  const bar = document.getElementById('seeker-bar');
-  if (!bar || videoDuration <= 0) return null;
-  const rect = bar.getBoundingClientRect();
-  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  return ratio * videoDuration;
-}
-
-function renderSeekerBeepMarkers() {
-  const container = document.getElementById('seeker-beep-markers');
-  if (!container) return;
-  container.innerHTML = '';
-  if (videoDuration <= 0 || currentBeeps.length === 0) return;
-  currentBeeps.forEach((t) => {
-    if (t < 0 || t > videoDuration) return;
-    const marker = document.createElement('div');
-    marker.className = 'seeker-beep-marker';
-    marker.style.left = `${(t / videoDuration) * 100}%`;
-    container.appendChild(marker);
-  });
-}
-
-function applyDragSeek() {
-  dragRafPending = false;
-  if (!isDragging || !ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
-  ytPlayer.seekTo(dragLatestTime, true);
-  const fill = document.getElementById('seeker-fill');
-  if (fill && videoDuration > 0) {
-    fill.style.width = `${(dragLatestTime / videoDuration) * 100}%`;
+  function setPlaying(v, fromPlayer){
+    playing = v;
+    app.setAttribute("data-playing", v?"true":"false");
+    if (!fromPlayer && usingPlayer()){
+      if (v) { try{ player.playVideo(); }catch(e){} }
+      else   { try{ player.pauseVideo(); }catch(e){} }
+    }
   }
-}
 
-// --- Audio + Visual ---
-async function playBeep() {
-  if (!audioCtx) audioCtx = new AudioContext();
-  if (audioCtx.state === 'suspended') await audioCtx.resume();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.frequency.value = 880;
-  osc.type = 'sine';
-  gain.gain.setValueAtTime(beepVolume, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
-  osc.start(audioCtx.currentTime);
-  osc.stop(audioCtx.currentTime + 0.2);
-}
-
-function flashScreen() {
-  const overlay = document.getElementById('flash-overlay');
-  overlay.removeAttribute('hidden');
-  overlay.classList.remove('flash');
-  // Force reflow so the animation restarts
-  void overlay.offsetWidth;
-  overlay.classList.add('flash');
-  setTimeout(() => {
-    overlay.setAttribute('hidden', '');
-    overlay.classList.remove('flash');
-  }, 300);
-}
-
-// --- History ---
-function renderHistory() {
-  const list = document.getElementById('history-list');
-  const items = Storage.all().sort(
-    (a, b) => new Date(b.analyzed_at) - new Date(a.analyzed_at)
-  );
-  list.innerHTML = '';
-  if (items.length === 0) {
-    list.innerHTML = '<li class="empty">尚無歷史紀錄</li>';
-    return;
+  function start(){
+    started = true;
+    ensureAudio();
+    startBtn.classList.add("hidden");
+    startBtn.style.display = "none";
+    setPlaying(true,false);
   }
-  items.forEach((item) => {
-    const li = document.createElement('li');
-    const safeId = item.video_id.replace(/[^A-Za-z0-9_-]/g, '');
-    li.innerHTML = `
-      <span class="title">${escapeHtml(item.title || item.video_id)}</span>
-      <div class="history-actions">
-        <button class="share-tile-btn" onclick="event.stopPropagation(); shareHistory('${safeId}', this)">分享</button>
-        <button class="delete-btn" onclick="event.stopPropagation(); deleteFromHistory('${safeId}')">刪除</button>
-      </div>
-    `;
-    li.style.cursor = 'pointer';
-    li.addEventListener('click', () => loadFromHistory(safeId));
-    list.appendChild(li);
-  });
-}
 
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function shareHistory(videoId, btn) {
-  const item = Storage.load(videoId);
-  if (!item) return;
-  const params = new URLSearchParams({ v: videoId });
-  if (item.beeps?.length > 0) params.set('t', item.beeps.join(','));
-  const url = `${location.origin}${location.pathname}?${params.toString()}`;
-  navigator.clipboard.writeText(url).then(() => {
-    const original = btn.textContent;
-    btn.textContent = '已複製！';
-    setTimeout(() => { btn.textContent = original; }, 1500);
-  });
-}
-
-function loadFromHistory(videoId) {
-  const item = Storage.load(videoId);
-  if (!item) return;
-  document.getElementById('url-input').value = item.url;
-  setBeeps(item.beeps);
-  document.getElementById('status-msg').textContent = '';
-  showPlayer(videoId);
-}
-
-function deleteFromHistory(videoId) {
-  Storage.remove(videoId);
-  renderHistory();
-}
-
-function setBeeps(beeps) {
-  currentBeeps = [...beeps].sort((a, b) => a - b);
-  playedBeepIndices.clear();
-  lastKnownTime = 0;
-  if (
-    expandedBeepTime !== null &&
-    !currentBeeps.some((b) => Math.abs(b - expandedBeepTime) < 0.005)
-  ) {
-    expandedBeepTime = null;
-    loopFormDraft = { time: null, interval: '', count: '' };
+  function setPhaseTheme(type){
+    var cur = app.getAttribute("data-phase");
+    if (cur !== type){
+      app.setAttribute("data-phase", type);
+      document.documentElement.style.setProperty("--phase", PH_LIT[type]);
+    }
   }
-  renderTimerList();
-  updateAddCurrentLabel();
-  const t = (ytPlayer && typeof ytPlayer.getCurrentTime === 'function')
-    ? ytPlayer.getCurrentTime() : 0;
-  updateCountdown(t);
-  renderSeekerBeepMarkers();
-}
 
-function showPlayer(videoId) {
-  currentVideoId = videoId;
-  const section = document.getElementById('player-section');
-  section.removeAttribute('hidden');
-  stopTicker();
-  isPlaying = false;
-  document.getElementById('countdown-fill').style.width = '0%';
-  document.getElementById('next-beep-label').textContent = '--';
-  const seekerFill = document.getElementById('seeker-fill');
-  if (seekerFill) seekerFill.style.width = '0%';
-  updateURL();
-  initPlayer(videoId);
-}
-
-// --- Timer Edit ---
-function formatTime(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-
-function renderTimerList() {
-  const list = document.getElementById('timer-list');
-  const count = document.getElementById('timer-count');
-  if (!list || !count) return;
-  count.textContent = '';
-  list.innerHTML = '';
-  if (currentBeeps.length === 0) {
-    list.innerHTML = '<li class="empty">新增一個 timer</li>';
-    return;
+  function fmt(s){
+    s = Math.max(0, Math.floor(s));
+    var m = Math.floor(s/60), ss = s%60;
+    return (m<10?"0":"")+m+":"+(ss<10?"0":"")+ss;
   }
-  currentBeeps.forEach((t) => {
-    const isExpanded = expandedBeepTime !== null && Math.abs(expandedBeepTime - t) < 0.005;
 
-    const li = document.createElement('li');
-    li.className = 'timer-item';
-    li.dataset.time = String(t);
-    if (isExpanded) li.classList.add('expanded');
+  function pulse(){
+    app.classList.remove("pulse"); void app.offsetWidth; app.classList.add("pulse");
+  }
 
-    const row = document.createElement('div');
-    row.className = 'timer-row';
+  function update(t){
+    var r = findPhase(t);
+    var idx = r.idx;
+    var type, timeLeft, dur, ph;
 
-    const timeEl = document.createElement('span');
-    timeEl.className = 'timer-time';
-    timeEl.textContent = formatTime(t);
-    timeEl.addEventListener('click', () => {
-      if (ytPlayer && typeof ytPlayer.seekTo === 'function') {
-        ytPlayer.seekTo(t, true);
+    if (r.done){
+      type = "done"; timeLeft = 0; dur = 1;
+    } else {
+      ph = r.phase; type = ph.type;
+      timeLeft = Math.max(0, ph.end - t);
+      dur = ph.end - ph.start || 1;
+    }
+
+    setPhaseTheme(type);
+
+    // phase change -> cue + pulse
+    if (idx !== prevIdx){
+      if (prevIdx !== -99 && started){
+        if (type === "work") cueWork();
+        else if (type === "rest") cueRest();
+        else if (type === "done") cueDone();
+        pulse();
       }
-    });
-
-    const actions = document.createElement('div');
-    actions.className = 'timer-actions';
-
-    const extendBtn = document.createElement('button');
-    extendBtn.className = 'extend-btn';
-    extendBtn.textContent = isExpanded ? '−' : '+';
-    extendBtn.setAttribute('aria-label', isExpanded ? '收起' : '展開');
-    extendBtn.addEventListener('click', () => toggleExtend(t));
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'delete-btn';
-    delBtn.textContent = '×';
-    delBtn.addEventListener('click', () => removeBeepByTime(t));
-
-    actions.appendChild(extendBtn);
-    actions.appendChild(delBtn);
-    row.appendChild(timeEl);
-    row.appendChild(actions);
-    li.appendChild(row);
-
-    const extend = document.createElement('div');
-    extend.className = 'timer-extend';
-    if (!isExpanded) extend.hidden = true;
-
-    const onceGroup = document.createElement('div');
-    onceGroup.className = 'extend-group extend-once';
-    const onceLabel = document.createElement('span');
-    onceLabel.className = 'extend-label';
-    onceLabel.textContent = '單次';
-    onceGroup.appendChild(onceLabel);
-    [5, 10, 20, 40].forEach((offset) => {
-      const b = document.createElement('button');
-      b.className = 'offset-btn';
-      b.textContent = `+${offset}`;
-      b.addEventListener('click', () => addBeep(t + offset));
-      onceGroup.appendChild(b);
-    });
-
-    const loopGroup = document.createElement('div');
-    loopGroup.className = 'extend-group extend-loop';
-    const loopLabel = document.createElement('span');
-    loopLabel.className = 'extend-label';
-    loopLabel.textContent = '循環';
-    const intervalInput = document.createElement('input');
-    intervalInput.type = 'number';
-    intervalInput.className = 'loop-interval';
-    intervalInput.min = '1';
-    intervalInput.step = '1';
-    intervalInput.inputMode = 'numeric';
-    intervalInput.placeholder = '秒';
-    const countInput = document.createElement('input');
-    countInput.type = 'number';
-    countInput.className = 'loop-count';
-    countInput.min = '1';
-    countInput.step = '1';
-    countInput.inputMode = 'numeric';
-    countInput.placeholder = '次';
-    if (isExpanded && loopFormDraft.time !== null && Math.abs(loopFormDraft.time - t) < 0.005) {
-      intervalInput.value = loopFormDraft.interval;
-      countInput.value = loopFormDraft.count;
+      prevIdx = idx;
+      lastBeepR = -1;
     }
-    intervalInput.addEventListener('input', () => {
-      loopFormDraft = { time: t, interval: intervalInput.value, count: countInput.value };
-    });
-    countInput.addEventListener('input', () => {
-      loopFormDraft = { time: t, interval: intervalInput.value, count: countInput.value };
-    });
-    const loopAddBtn = document.createElement('button');
-    loopAddBtn.className = 'loop-add-btn';
-    loopAddBtn.textContent = '新增';
-    loopAddBtn.addEventListener('click', () => {
-      addLoopBeeps(t, intervalInput.value, countInput.value, loopAddBtn);
-    });
-    loopGroup.appendChild(loopLabel);
-    loopGroup.appendChild(intervalInput);
-    loopGroup.appendChild(countInput);
-    loopGroup.appendChild(loopAddBtn);
 
-    extend.appendChild(onceGroup);
-    extend.appendChild(loopGroup);
-    li.appendChild(extend);
+    // countdown beeps (last 3s of any timed phase, incl. 準備)
+    if (!r.done){
+      var rc = Math.ceil(timeLeft - 1e-6);
+      if (rc !== lastBeepR && rc >= 1 && rc <= 3 && started){
+        beepCount();
+        lastBeepR = rc;
+      } else if (rc > 3){
+        lastBeepR = rc;
+      }
+    }
 
-    list.appendChild(li);
+    // text
+    elPhase.textContent = PH_TEXT[type];
+    if (r.done){
+      elCount.textContent = "✓";
+      elRep.textContent = "全部完成 · " + TOTAL_WORK + " 組";
+      elNext.innerHTML = '<span class="dot"></span>做得好！';
+    } else {
+      elCount.textContent = Math.ceil(timeLeft - 1e-6);
+      if (type === "ready"){
+        elRep.textContent = "準備開始 · 共 " + TOTAL_WORK + " 組";
+        elNext.innerHTML = '<span class="dot"></span>接下來：運動';
+      } else if (type === "work"){
+        elRep.innerHTML = "第 <b>" + ph.workNo + "</b> / " + TOTAL_WORK + " 組";
+        elNext.innerHTML = '<span class="dot"></span>' + (ph.workNo>=TOTAL_WORK ? "接下來：完成" : "接下來：休息");
+      } else { // rest
+        elRep.innerHTML = "休息中 · 下一組 <b>" + Math.min(ph.workNo+1, TOTAL_WORK) + "</b>";
+        elNext.innerHTML = '<span class="dot"></span>接下來：運動';
+      }
+    }
+
+    // ring (remaining fraction)
+    var frac = r.done ? 0 : Math.max(0, Math.min(1, timeLeft / dur));
+    elRing.style.strokeDashoffset = (RING_C * (1 - frac)).toFixed(1);
+
+    // progress segments
+    for (var i=0; i<segEls.length; i++){
+      var s = segEls[i], p;
+      if (t >= s.end) p = 100;
+      else if (t <= s.start) p = 0;
+      else p = ((t - s.start)/(s.end - s.start))*100;
+      s.fill.style.width = p.toFixed(2) + "%";
+    }
+
+    // elapsed label (within workout region)
+    elElapsed.textContent = fmt(Math.min(t, T_END)) + " / " + fmt(T_END);
+
+    // persist playback position
+    if (t - lastSave > 1 || lastSave - t > 1){
+      lastSave = t;
+      try{ localStorage.setItem("yst-time", String(t)); }catch(e){}
+    }
+  }
+
+  /* ---------- raf loop ---------- */
+  var lastNow = performance.now();
+  function frame(now){
+    var dt = (now - lastNow)/1000; lastNow = now;
+    if (dt > 0.5) dt = 0;
+    if (usingPlayer()){
+      try{ clock = player.getCurrentTime() || clock; }catch(e){}
+    } else if (playing){
+      clock += dt;
+      if (clock >= T_END) { clock = T_END; setPlaying(false,false); }
+    }
+    update(clock);
+    updateThumb(clock);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ---------- interactions ---------- */
+  startBtn.addEventListener("click", start);
+  playBtn.addEventListener("click", function(){
+    ensureAudio();
+    if (!started){ start(); return; }
+    setPlaying(!playing, false);
   });
-}
 
-function updateAddCurrentLabel() {}
+  beepBtn.addEventListener("click", function(){
+    beepOn = !beepOn;
+    beepBtn.setAttribute("data-on", beepOn?"true":"false");
+    try{ localStorage.setItem("yst-beep", beepOn?"1":"0"); }catch(e){}
+    if (beepOn){ ensureAudio(); tone(880,0.1,0,"square",0.14); }
+  });
 
-function toggleExtend(t) {
-  if (expandedBeepTime !== null && Math.abs(expandedBeepTime - t) < 0.005) {
-    expandedBeepTime = null;
-    loopFormDraft = { time: null, interval: '', count: '' };
-  } else {
-    expandedBeepTime = t;
-    loopFormDraft = { time: t, interval: '', count: '' };
-  }
-  renderTimerList();
-}
+  /* 版面（專注／儀表板）由 CSS 響應式自動決定，無需切換鈕 */
 
-function addBeep(t) {
-  const rounded = Math.round(t * 100) / 100;
-  if (currentBeeps.some((b) => Math.abs(b - rounded) < 0.005)) return;
-  setBeeps([...currentBeeps, rounded]);
-  persistCurrentBeeps();
-}
-
-function removeBeepByTime(t) {
-  if (expandedBeepTime !== null && Math.abs(expandedBeepTime - t) < 0.005) {
-    expandedBeepTime = null;
-    loopFormDraft = { time: null, interval: '', count: '' };
-  }
-  setBeeps(currentBeeps.filter((b) => Math.abs(b - t) >= 0.005));
-  persistCurrentBeeps();
-}
-
-function removeBeepAt(i) {
-  const t = currentBeeps[i];
-  if (t === undefined) return;
-  removeBeepByTime(t);
-}
-
-function addLoopBeeps(baseT, intervalRaw, countRaw, btn) {
-  const interval = Number(intervalRaw);
-  const count = Number(countRaw);
-  if (!Number.isFinite(interval) || !Number.isFinite(count) || interval <= 0 || count <= 0) {
-    flashLoopError(btn);
-    return;
-  }
-  const safeCount = Math.min(Math.floor(count), 200);
-  for (let n = 1; n <= safeCount; n++) {
-    addBeep(baseT + interval * n);
-  }
-}
-
-function flashLoopError(btn) {
-  const original = btn.textContent;
-  btn.textContent = '無效';
-  btn.disabled = true;
-  setTimeout(() => {
-    btn.textContent = original;
-    btn.disabled = false;
-  }, 800);
-}
-
-function persistCurrentBeeps() {
-  if (!currentVideoId) return;
-  const record = Storage.load(currentVideoId);
-  if (!record) return;
-  Storage.save(currentVideoId, { ...record, beeps: [...currentBeeps] });
-  renderHistory();
-  updateURL();
-}
-
-function updateVolumeLabel() {
-  const label = document.getElementById('volume-label');
-  if (label) label.textContent = `${volumeIndex + 1}/10`;
-}
-
-function persistVolume() {
-  localStorage.setItem(VOLUME_KEY, String(beepVolume));
-}
-
-function updateURL() {
-  if (!currentVideoId) return;
-  const params = new URLSearchParams();
-  params.set('v', currentVideoId);
-  if (currentBeeps.length > 0) params.set('t', currentBeeps.join(','));
-  history.replaceState(null, '', '?' + params.toString());
-}
-
-
-// --- DOM Events ---
-function extractVideoId(url) {
-  const match = url.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
-  return match ? match[1] : null;
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  // Restore from URL params (bookmarks / shared links)
-  const params = new URLSearchParams(window.location.search);
-  const urlVideoId = params.get('v');
-  if (urlVideoId) {
-    const urlBeeps = params.get('t')
-      ? params.get('t').split(',').map(Number).filter(n => !isNaN(n) && n >= 0)
-      : null;
-    const url = `https://www.youtube.com/watch?v=${urlVideoId}`;
-    document.getElementById('url-input').value = url;
-    if (!audioCtx) audioCtx = new AudioContext();
-    const existing = Storage.load(urlVideoId);
-    const beeps = urlBeeps ?? (existing?.beeps || []);
-    if (!existing) {
-      Storage.save(urlVideoId, { url, video_id: urlVideoId, title: '', beeps, analyzed_at: new Date().toISOString() });
-    } else if (urlBeeps) {
-      Storage.save(urlVideoId, { ...existing, beeps });
+  /* ---------- progress drag ---------- */
+  function seekToFrac(frac){
+    frac = Math.max(0, Math.min(1, frac));
+    var target = T_START + frac*(T_END - T_START);
+    clock = target;
+    prevIdx = -99; lastBeepR = -1;
+    if (usingPlayer()){ try{ player.seekTo(target, true); }catch(err){} }
+    update(clock);
+    if (elProgressThumb && elProgressTrack){
+      var trackW = elProgressTrack.getBoundingClientRect().width;
+      var px = frac * (trackW - 28) + 14;
+      elProgressThumb.style.left = px.toFixed(1) + "px";
     }
-    setBeeps(beeps);
-    showPlayer(urlVideoId);
-    renderHistory();
+  }
+  function fracFromEvent(e){
+    var rect = elProgressTrack.getBoundingClientRect();
+    var px = (e.touches ? e.touches[0].clientX : e.clientX);
+    return (px - rect.left) / rect.width;
+  }
+  var dragging = false;
+  elProgressTrack.addEventListener("mousedown", function(e){
+    dragging = true; elProgressTrack.classList.add("dragging");
+    seekToFrac(fracFromEvent(e)); e.preventDefault();
+  });
+  document.addEventListener("mousemove", function(e){
+    if (!dragging) return;
+    seekToFrac(fracFromEvent(e));
+  });
+  document.addEventListener("mouseup", function(){
+    if (dragging){ dragging = false; elProgressTrack.classList.remove("dragging"); }
+  });
+  elProgressTrack.addEventListener("touchstart", function(e){
+    dragging = true; elProgressTrack.classList.add("dragging");
+    seekToFrac(fracFromEvent(e)); e.preventDefault();
+  }, {passive:false});
+  document.addEventListener("touchmove", function(e){
+    if (!dragging) return;
+    seekToFrac(fracFromEvent(e)); e.preventDefault();
+  }, {passive:false});
+  document.addEventListener("touchend", function(){
+    if (dragging){ dragging = false; elProgressTrack.classList.remove("dragging"); }
+  });
+  function updateThumb(t){
+    if (dragging || !elProgressThumb || !elProgressTrack || T_END <= T_START) return;
+    var frac = Math.max(0, Math.min(1, (t - T_START)/(T_END - T_START)));
+    var trackW = elProgressTrack.getBoundingClientRect().width;
+    if (trackW > 0){
+      var px = frac * (trackW - 28) + 14;
+      elProgressThumb.style.left = px.toFixed(1) + "px";
+    }
   }
 
-  document.getElementById('load-btn').addEventListener('click', () => {
-    const url = document.getElementById('url-input').value.trim();
-    if (!url) return;
+  /* ---------- 歷史紀錄 ---------- */
+  var hlist = document.getElementById("hlist");
+  var hCount = document.getElementById("hCount");
 
-    const statusMsg = document.getElementById('status-msg');
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-      statusMsg.textContent = '無效的 YouTube 網址';
+  function workoutSummary(beeps){
+    var n = Array.isArray(beeps) ? beeps.length : 0;
+    if (n < 2) return "尚未設定時間點";
+    var sets = Math.floor(n / 2);            // 每組 = 運動起點 + 休息起點
+    var dur = beeps[n-1] - beeps[0];
+    return sets + " 組 · " + fmtClock(dur);
+  }
+  function fmtClock(s){
+    s = Math.max(0, Math.round(s));
+    var m = Math.floor(s/60), ss = s%60;
+    return m + ":" + (ss<10?"0":"") + ss;
+  }
+
+  function renderHistory(){
+    if (!hlist) return;
+    var items = [];
+    try{ items = Storage.all().filter(function(r){ return r && r.video_id; }); }catch(e){ items = []; }
+    items.sort(function(a,b){
+      return new Date(b.analyzed_at||0) - new Date(a.analyzed_at||0);
+    });
+    if (hCount) hCount.textContent = items.length;
+    hlist.innerHTML = "";
+    if (items.length === 0){
+      var empty = document.createElement("p");
+      empty.className = "hempty";
+      empty.textContent = "尚無歷史紀錄。載入影片並設定時間點後就會出現在這裡。";
+      hlist.appendChild(empty);
       return;
     }
-
-    statusMsg.textContent = '';
-    document.getElementById('url-input').value = '';
-    if (!audioCtx) audioCtx = new AudioContext();
-
-    const existing = Storage.load(videoId);
-    if (existing) {
-      setBeeps(existing.beeps || []);
-    } else {
-      setBeeps([]);
-      Storage.save(videoId, {
-        url,
-        video_id: videoId,
-        title: '',
-        beeps: [],
-        analyzed_at: new Date().toISOString(),
+    items.forEach(function(rec){
+      var id = rec.video_id;
+      var row = document.createElement("div");
+      row.className = "hrow" + (id === VIDEO ? " active" : "");
+      var title = (rec.title && rec.title.trim()) ? rec.title.trim() : id;
+      row.innerHTML =
+        '<div class="hinfo">'+
+          '<div class="hid"></div>'+
+          '<div class="hmeta">'+workoutSummary(rec.beeps)+'</div>'+
+        '</div>'+
+        '<button class="hdel" aria-label="刪除紀錄">✕</button>';
+      row.querySelector(".hid").textContent = title;
+      row.addEventListener("click", function(e){
+        if (e.target.closest(".hdel")) return;
+        if (id === VIDEO){ closeDrawer(); return; }
+        loadVideo(id); syncURL();
       });
-    }
-    showPlayer(videoId);
-    renderHistory();
-  });
-
-  document.getElementById('add-current-btn').addEventListener('click', () => {
-    if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
-    addBeep(ytPlayer.getCurrentTime());
-  });
-
-  updateVolumeLabel();
-
-  document.getElementById('volume-down-btn').addEventListener('click', () => {
-    if (volumeIndex > 0) {
-      volumeIndex--;
-      beepVolume = VOLUME_LEVELS[volumeIndex];
-      persistVolume();
-      updateVolumeLabel();
-    }
-  });
-
-  document.getElementById('volume-up-btn').addEventListener('click', () => {
-    if (volumeIndex < VOLUME_LEVELS.length - 1) {
-      volumeIndex++;
-      beepVolume = VOLUME_LEVELS[volumeIndex];
-      persistVolume();
-      updateVolumeLabel();
-    }
-  });
-
-  document.getElementById('player-click-overlay').addEventListener('click', () => {
-    if (!ytPlayer || typeof ytPlayer.getPlayerState !== 'function') return;
-    const state = ytPlayer.getPlayerState();
-    if (state === YT.PlayerState.PLAYING) {
-      ytPlayer.pauseVideo();
-    } else {
-      ytPlayer.playVideo();
-    }
-  });
-
-  const seekerBar = document.getElementById('seeker-bar');
-  seekerBar.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (isDragging) return; // shouldn't happen, but guard
-    if (!ytPlayer || typeof ytPlayer.seekTo !== 'function') return;
-    const t = seekerTimeFromPointer(e.clientX);
-    if (t === null) return;
-    ytPlayer.seekTo(t, true);
-    const fill = document.getElementById('seeker-fill');
-    if (fill && videoDuration > 0) {
-      fill.style.width = `${(t / videoDuration) * 100}%`;
-    }
-  });
-
-  seekerBar.addEventListener('pointerdown', (e) => {
-    e.stopPropagation();
-    if (!ytPlayer || typeof ytPlayer.seekTo !== 'function' || videoDuration <= 0) return;
-    e.preventDefault();
-    isDragging = true;
-    dragWasPlaying = ytPlayer.getPlayerState() === YT.PlayerState.PLAYING;
-    if (dragWasPlaying) ytPlayer.pauseVideo();
-    seekerBar.setPointerCapture(e.pointerId);
-    const t = seekerTimeFromPointer(e.clientX);
-    if (t !== null) {
-      dragLatestTime = t;
-      if (!dragRafPending) {
-        dragRafPending = true;
-        requestAnimationFrame(applyDragSeek);
-      }
-    }
-  });
-
-  seekerBar.addEventListener('pointermove', (e) => {
-    if (!isDragging) return;
-    const t = seekerTimeFromPointer(e.clientX);
-    if (t === null) return;
-    dragLatestTime = t;
-    // Update fill immediately for smooth visual feedback (cheap)
-    const fill = document.getElementById('seeker-fill');
-    if (fill && videoDuration > 0) {
-      fill.style.width = `${(t / videoDuration) * 100}%`;
-    }
-    // Throttle the actual seekTo call to once per frame
-    if (!dragRafPending) {
-      dragRafPending = true;
-      requestAnimationFrame(applyDragSeek);
-    }
-  });
-
-  function endDrag(e) {
-    if (!isDragging) return;
-    isDragging = false;
-    try { seekerBar.releasePointerCapture(e.pointerId); } catch (_) {}
-    if (dragWasPlaying && ytPlayer && typeof ytPlayer.playVideo === 'function') {
-      ytPlayer.playVideo();
-    }
-    dragWasPlaying = false;
+      row.querySelector(".hdel").addEventListener("click", function(e){
+        e.stopPropagation();
+        try{ Storage.remove(id); }catch(err){}
+        renderHistory();
+      });
+      hlist.appendChild(row);
+    });
   }
 
-  seekerBar.addEventListener('pointerup', endDrag);
-  seekerBar.addEventListener('pointercancel', endDrag);
+  /* ---------- 設定抽屜 / 分享 ---------- */
+  var settingsBtn = document.getElementById("settingsBtn");
+  var drawer = document.getElementById("drawer");
+  var drawerBg = document.getElementById("drawerBg");
+  var drawerClose = document.getElementById("drawerClose");
+  var urlInput = document.getElementById("urlInput");
+  var loadBtn = document.getElementById("loadBtn");
+  var volRange = document.getElementById("volRange");
+  var vlevel = document.getElementById("vlevel");
+  var volDown = document.getElementById("volDown");
+  var volUp = document.getElementById("volUp");
+  var addNow = document.getElementById("addNow");
+  var tlist = document.getElementById("tlist");
+  var copyLink = document.getElementById("copyLink");
+  var resetBtn = document.getElementById("resetBtn");
 
-});
+  function fmtMs(s){
+    var neg = s<0; s = Math.abs(s);
+    var m = Math.floor(s/60), rem = s - m*60;
+    var w = Math.floor(rem), cs = Math.round((rem-w)*100);
+    if (cs===100){ cs=0; w++; }
+    return (neg?"-":"") + m + ":" + (w<10?"0":"") + w + "." + (cs<10?"0":"") + cs;
+  }
+
+  function renderTimers(){
+    if (!tlist) return;
+    tlist.innerHTML = "";
+    TS.forEach(function(v, i){
+      var isWork = (i%2===0);
+      var row = document.createElement("div");
+      row.className = "trow";
+      row.innerHTML =
+        '<span class="ti">'+(i+1)+'</span>'+
+        '<span class="tt">'+fmtMs(v)+'</span>'+
+        '<span class="tag '+(isWork?"work":"rest")+'">'+(isWork?"運動":"休息")+'</span>'+
+        '<button class="del" aria-label="刪除">✕</button>';
+      row.querySelector(".del").addEventListener("click", function(){
+        TS.splice(i,1); rebuild(); syncURL(); saveConfig();
+      });
+      tlist.appendChild(row);
+    });
+  }
+
+  function parseVideoId(s){
+    s = (s||"").trim();
+    if (!s) return "";
+    var m = s.match(/(?:v=|\/embed\/|youtu\.be\/|\/shorts\/|\/v\/)([\w-]{11})/);
+    if (m) return m[1];
+    if (/^[\w-]{11}$/.test(s)) return s;
+    return "";
+  }
+
+  function syncURL(){
+    try{
+      var u = new URL(location.href);
+      u.searchParams.set("v", VIDEO);
+      u.searchParams.set("t", TS.map(function(x){return Math.round(x*100)/100;}).join(","));
+      history.replaceState(null, "", u.pathname + "?" + u.searchParams.toString());
+    }catch(e){}
+  }
+
+  function saveConfig(){
+    lsSet("yst-video", VIDEO);
+    lsSet("yst-vol", String(level));
+    // per-video 時間點存進 Storage（沿用專案既有資料結構）
+    try{
+      var existing = Storage.load(VIDEO) || {};
+      Storage.save(VIDEO, {
+        url: existing.url || ("https://www.youtube.com/watch?v=" + VIDEO),
+        video_id: VIDEO,
+        title: existing.title || "",
+        beeps: TS.slice(),
+        analyzed_at: existing.analyzed_at || new Date().toISOString()
+      });
+    }catch(e){}
+    if (typeof renderHistory === "function") renderHistory();
+  }
+
+  function loadVideo(id){
+    if (!id) return;
+    VIDEO = id;
+    // 切換影片時，載入該影片既有時間點；若無則沿用目前的（讓使用者可套用同一組節奏）
+    try{
+      var rec = Storage.load(VIDEO);
+      if (rec && Array.isArray(rec.beeps) && rec.beeps.length >= 2) TS = rec.beeps.slice();
+    }catch(e){}
+    clock = 0; prevIdx = -99; lastBeepR = -1;
+    started = false; setPlaying(false,false);
+    startBtn.style.display = ""; startBtn.classList.remove("hidden");
+    if (player && playerReady){ try{ player.cueVideoById(id); playerOk = true; }catch(e){} }
+    rebuild();
+    var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
+    saveConfig();
+    update(clock);
+  }
+
+  function setVolume(v){
+    level = Math.max(0, Math.min(10, v|0));
+    masterVol = level/10;
+    if (volRange) volRange.value = level;
+    if (vlevel) vlevel.textContent = level + " / 10";
+    saveConfig();
+  }
+
+  function openDrawer(){
+    drawer.classList.add("open"); drawer.setAttribute("aria-hidden","false");
+    drawerBg.hidden = false;
+    if (typeof renderHistory === "function") renderHistory();
+    urlInput.value = ""; urlInput.placeholder = "目前 ID：" + VIDEO;
+  }
+  function closeDrawer(){
+    drawer.classList.remove("open"); drawer.setAttribute("aria-hidden","true");
+    setTimeout(function(){ drawerBg.hidden = true; }, 280);
+  }
+
+  settingsBtn.addEventListener("click", openDrawer);
+  drawerClose.addEventListener("click", closeDrawer);
+  drawerBg.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", function(e){ if (e.key==="Escape") closeDrawer(); });
+
+  loadBtn.addEventListener("click", function(){
+    var id = parseVideoId(urlInput.value);
+    if (id){ loadVideo(id); syncURL(); urlInput.value=""; urlInput.placeholder="目前 ID："+VIDEO; }
+    else { urlInput.value=""; urlInput.placeholder="連結無效，請再試一次"; }
+  });
+  urlInput.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); loadBtn.click(); } });
+
+  volRange.addEventListener("input", function(){ setVolume(parseInt(volRange.value,10)); });
+  volRange.addEventListener("change", function(){ ensureAudio(); tone(880,0.1,0,"square",0.16); });
+  volDown.addEventListener("click", function(){ setVolume(level-1); ensureAudio(); tone(880,0.1,0,"square",0.16); });
+  volUp.addEventListener("click", function(){ setVolume(level+1); ensureAudio(); tone(880,0.1,0,"square",0.16); });
+
+  addNow.addEventListener("click", function(){
+    var t = Math.round(Math.max(0, clock)*100)/100;
+    TS.push(t); rebuild(); syncURL(); saveConfig();
+  });
+
+  copyLink.addEventListener("click", function(){
+    syncURL();
+    var orig = copyLink.textContent;
+    var done = function(){ copyLink.textContent = "已複製連結 ✓"; setTimeout(function(){ copyLink.textContent = orig; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(location.href).then(done, done); }
+    else { done(); }
+  });
+
+  resetBtn.addEventListener("click", function(){
+    TS = DEFAULT_TS.slice();
+    setVolume(6);
+    loadVideo(DEFAULT_VIDEO);
+    rebuild(); syncURL(); saveConfig();
+  });
+
+  /* ---------- restore + init ---------- */
+  (function restore(){
+    try{
+      var bp = ls("yst-beep");
+      if (bp === "0"){ beepOn=false; beepBtn.setAttribute("data-on","false"); }
+    }catch(e){}
+
+    var volRange = document.getElementById("volRange");
+    var vlevel = document.getElementById("vlevel");
+    if (volRange) volRange.value = level;
+    if (vlevel) vlevel.textContent = level + " / 10";
+
+    rebuild();
+
+    var tt = parseFloat(ls("yst-time"));
+    if (!isNaN(tt) && tt > 1 && tt < T_END){ restoreTime = tt; clock = tt; }
+
+    document.documentElement.style.setProperty("--phase", PH_LIT.ready);
+    var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
+    saveConfig();      // 持久化目前影片與時間點（並渲染歷史）
+    update(clock);
+  })();
+
+})();
