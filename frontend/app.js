@@ -38,8 +38,11 @@
   }
   if (!TS) TS = DEFAULT_TS.slice();
 
+  // 提示音量採對數（感知）刻度：每一階提升的響度感受一致（沿用先前 PR 的改進）
+  // index 0 = 靜音；1–10 對應約 -20dB → 0dB 的增益曲線
+  var VOL_CURVE = [0, 0.1, 0.14, 0.2, 0.28, 0.4, 0.55, 0.7, 0.82, 0.92, 1.0];
   var level = 6; var _lv = parseInt(ls("yst-vol"),10); if (!isNaN(_lv) && _lv>=0 && _lv<=10) level = _lv;
-  var masterVol = level/10;
+  var masterVol = VOL_CURVE[level];
 
   var phases = [], W = 0, TOTAL_WORK = 0, T_START = 0, T_END = 0;
 
@@ -549,7 +552,7 @@
 
   function setVolume(v){
     level = Math.max(0, Math.min(10, v|0));
-    masterVol = level/10;
+    masterVol = VOL_CURVE[level];
     if (volRange) volRange.value = level;
     if (vlevel) vlevel.textContent = level + " / 10";
     saveConfig();
