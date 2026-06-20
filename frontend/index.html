@@ -7,10 +7,25 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Noto+Sans+TC:wght@500;700;900&family=Teko:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div class="app" id="app" data-phase="ready" data-playing="false">
+
+  <div class="fab-cluster">
+    <button class="fab" id="historyBtn" aria-label="歷史紀錄">
+      <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path><path d="M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3.5 4v3h3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="ftxt">歷史</span>
+    </button>
+    <button class="fab" id="libraryBtn" aria-label="共享清單">
+      <svg viewBox="0 0 24 24"><path d="M4 5h10M4 10h10M4 15h7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path><path d="M18 8l3 3-3 3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="ftxt">共享清單</span>
+    </button>
+    <button class="fab" id="settingsBtn" aria-label="設定">
+      <svg viewBox="0 0 24 24"><path d="M3 7h11M3 12h7M3 17h13" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path><circle cx="17" cy="7" r="2.5"></circle><circle cx="13" cy="12" r="2.5"></circle><circle cx="19" cy="17" r="2.5"></circle></svg>
+      <span class="ftxt">設定</span>
+    </button>
+  </div>
 
   <main class="stage">
     <div class="video">
@@ -59,15 +74,44 @@
           <svg viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
           <span class="on-txt">提示音 開</span><span class="off-txt">提示音 關</span>
         </button>
-        <button class="gear" id="settingsBtn" aria-label="設定">
-          <svg viewBox="0 0 24 24"><path d="M3 7h11M3 12h7M3 17h13" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path><circle cx="17" cy="7" r="2.5"></circle><circle cx="13" cy="12" r="2.5"></circle><circle cx="19" cy="17" r="2.5"></circle></svg>
-          <span class="gtxt">設定</span>
-        </button>
       </div>
     </section>
   </main>
 
   <div class="drawer-backdrop" id="drawerBg" hidden></div>
+
+  <aside class="drawer left" id="libDrawer" aria-hidden="true" aria-label="共享清單">
+    <div class="drawer-head">
+      <h2>共享清單</h2>
+      <button class="x" id="libClose" aria-label="關閉">✕</button>
+    </div>
+    <div class="drawer-body">
+      <p class="lib-intro">選一個別人分享的訓練計時，點一下即可載入開練。</p>
+      <div class="lib-list" id="libList"></div>
+      <section class="dsec" style="margin-top:8px;">
+        <h3>加入共享清單</h3>
+        <div class="field" style="margin-bottom:8px;">
+          <input id="authorInput" type="text" placeholder="你的暱稱（選填）">
+        </div>
+        <button id="publishBtn" class="publishbtn">＋ 把目前計時加入清單</button>
+        <p class="hint">加入後其他人也能看到並載入。</p>
+      </section>
+    </div>
+  </aside>
+
+  <aside class="drawer left" id="histDrawer" aria-hidden="true" aria-label="歷史紀錄">
+    <div class="drawer-head">
+      <h2>歷史紀錄</h2>
+      <button class="x" id="histClose" aria-label="關閉">✕</button>
+    </div>
+    <div class="drawer-body">
+      <p class="lib-intro">你看過的訓練計時，最近的在最上面。點一下即可重新載入。</p>
+      <div class="lib-list" id="histList"></div>
+      <section class="dsec" style="margin-top:8px;">
+        <button id="clearHistBtn" class="copybtn ghost">清除歷史紀錄</button>
+      </section>
+    </div>
+  </aside>
   <aside class="drawer" id="drawer" aria-hidden="true" aria-label="設定">
     <div class="drawer-head">
       <h2>設定</h2>
@@ -103,12 +147,6 @@
       </section>
 
       <section class="dsec">
-        <h3>歷史紀錄<span class="cnt" id="hCount">0</span></h3>
-        <div class="hlist" id="hlist"></div>
-        <p class="hint">點選即可載入該影片與其時間點。</p>
-      </section>
-
-      <section class="dsec">
         <button id="copyLink" class="copybtn">複製分享連結</button>
         <button id="resetBtn" class="copybtn ghost">還原為預設影片與時間點</button>
       </section>
@@ -118,6 +156,7 @@
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script src="storage.js?v=2"></script>
-<script src="app.js?v=4"></script>
+<script src="config.js?v=1"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

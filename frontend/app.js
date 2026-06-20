@@ -17,6 +17,9 @@
     700.59,745.56,760.59,805.56,820.59,865.56,880.59,925.56,940.59,985.56,1000.59,1045.56,
     1060.59,1105.56,1120.59,1165.56,1180.59,1225.56,1240.59];
 
+  var libApiUrl = (window.YST_CONFIG && window.YST_CONFIG.sharedApiUrl) || "";
+  var AV_COLORS = ["oklch(0.70 0.185 42)","oklch(0.74 0.115 205)","oklch(0.76 0.16 152)","oklch(0.84 0.155 92)","oklch(0.7 0.16 330)"];
+
   var params = new URLSearchParams(location.search);
   function ls(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
   function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -38,8 +41,7 @@
   }
   if (!TS) TS = DEFAULT_TS.slice();
 
-  // 提示音量採對數（感知）刻度：每一階提升的響度感受一致（沿用先前 PR 的改進）
-  // index 0 = 靜音；1–10 對應約 -20dB → 0dB 的增益曲線
+  // 提示音量採對數（感知）刻度：每一階提升的響度感受一致
   var VOL_CURVE = [0, 0.1, 0.14, 0.2, 0.28, 0.4, 0.55, 0.7, 0.82, 0.92, 1.0];
   var level = 6; var _lv = parseInt(ls("yst-vol"),10); if (!isNaN(_lv) && _lv>=0 && _lv<=10) level = _lv;
   var masterVol = VOL_CURVE[level];
@@ -126,8 +128,8 @@
     o.start(t0); o.stop(t0+dur+0.03);
   }
   function beepCount(){ tone(880,0.12,0,"square",0.16); }                 // 3-2-1
-  function cueWork(){ tone(1318,0.16,0,"sawtooth",0.20); tone(1760,0.20,0.14,"sawtooth",0.18); } // bright rising
-  function cueRest(){ tone(523,0.40,0,"sine",0.18); }                     // mellow low
+  function cueWork(){ tone(1318,0.16,0,"sawtooth",0.20); tone(1760,0.20,0.14,"sawtooth",0.18); }
+  function cueRest(){ tone(523,0.40,0,"sine",0.18); }
   function cueDone(){ [659,880,1175,1568].forEach(function(f,i){ tone(f,0.24,i*0.16,"triangle",0.17); }); }
 
   /* ---------- youtube player ---------- */
@@ -142,9 +144,9 @@
       var data = player.getVideoData && player.getVideoData();
       var title = data && data.title;
       if (!title) return;
-      var rec = Storage.load(VIDEO);
-      if (rec && !rec.title){
-        Storage.save(VIDEO, Object.assign({}, rec, { title: title }));
+      var stored = Storage.load(VIDEO);
+      if (stored && !stored.title){
+        Storage.save(VIDEO, Object.assign({}, stored, { title: title }));
         if (typeof renderHistory === "function") renderHistory();
       }
     }catch(e){}
@@ -183,7 +185,6 @@
   function findPhase(t){
     if (t >= T_END) return {idx: phases.length, done:true};
     if (t < TS[0])  return {idx:0, phase:phases[0], done:false};
-    // segments live at phases[1..]
     for (var k=1; k<phases.length; k++){
       if (t < phases[k].end) return {idx:k, phase:phases[k], done:false};
     }
@@ -299,7 +300,7 @@
       s.fill.style.width = p.toFixed(2) + "%";
     }
 
-    // elapsed label (within workout region)
+    // elapsed label
     elElapsed.textContent = fmt(Math.min(t, T_END)) + " / " + fmt(T_END);
 
     // persist playback position
@@ -340,8 +341,6 @@
     try{ localStorage.setItem("yst-beep", beepOn?"1":"0"); }catch(e){}
     if (beepOn){ ensureAudio(); tone(880,0.1,0,"square",0.14); }
   });
-
-  /* 版面（專注／儀表板）由 CSS 響應式自動決定，無需切換鈕 */
 
   /* ---------- progress drag ---------- */
   function seekToFrac(frac){
@@ -395,80 +394,311 @@
     }
   }
 
-  /* ---------- 歷史紀錄 ---------- */
-  var hlist = document.getElementById("hlist");
-  var hCount = document.getElementById("hCount");
-
-  function workoutSummary(beeps){
-    var n = Array.isArray(beeps) ? beeps.length : 0;
-    if (n < 2) return "尚未設定時間點";
-    var sets = Math.floor(n / 2);            // 每組 = 運動起點 + 休息起點
-    var dur = beeps[n-1] - beeps[0];
-    return sets + " 組 · " + fmtClock(dur);
+  /* ---------- 共用小工具 ---------- */
+  function statsOf(ts){
+    if (!Array.isArray(ts) || ts.length < 2) return {work:0, dur:0};
+    return {
+      work: Math.ceil((ts.length - 1) / 2),
+      dur:  Math.round(ts[ts.length-1] - ts[0])
+    };
   }
-  function fmtClock(s){
-    s = Math.max(0, Math.round(s));
+  function fmtDurSec(s){
+    s = Math.round(Math.abs(s||0));
     var m = Math.floor(s/60), ss = s%60;
     return m + ":" + (ss<10?"0":"") + ss;
   }
+  function avColor(name){
+    var h = 0;
+    for (var i=0; i<(name||"").length; i++) h = (h*31 + name.charCodeAt(i)) % AV_COLORS.length;
+    return AV_COLORS[h];
+  }
 
-  function renderHistory(){
-    if (!hlist) return;
-    var items = [];
-    try{ items = Storage.all().filter(function(r){ return r && r.video_id; }); }catch(e){ items = []; }
-    items.sort(function(a,b){
-      return new Date(b.analyzed_at||0) - new Date(a.analyzed_at||0);
-    });
-    if (hCount) hCount.textContent = items.length;
-    hlist.innerHTML = "";
-    if (items.length === 0){
-      var empty = document.createElement("p");
-      empty.className = "hempty";
-      empty.textContent = "尚無歷史紀錄。載入影片並設定時間點後就會出現在這裡。";
-      hlist.appendChild(empty);
-      return;
+  /* ---------- 多抽屜系統 ---------- */
+  var drawerBg  = document.getElementById("drawerBg");
+  var drawer    = document.getElementById("drawer");      // 設定（右）
+  var histDrawer = document.getElementById("histDrawer"); // 歷史（左）
+  var libDrawer  = document.getElementById("libDrawer");  // 共享清單（左）
+
+  var openEl = null;
+  var _bgT   = null;
+
+  function openDrawer(el){
+    if (_bgT){ clearTimeout(_bgT); _bgT = null; }
+    // 關掉已開的抽屜（不觸發 backdrop 消失）
+    if (openEl && openEl !== el){
+      var wasLeft = openEl.classList.contains("left");
+      openEl.style.transform = wasLeft ? "translateX(-100%)" : "translateX(100%)";
+      openEl.setAttribute("aria-hidden","true");
     }
-    items.forEach(function(rec){
-      var id = rec.video_id;
-      var row = document.createElement("div");
-      row.className = "hrow" + (id === VIDEO ? " active" : "");
-      var title = (rec.title && rec.title.trim()) ? rec.title.trim() : id;
-      row.innerHTML =
-        '<div class="hinfo">'+
-          '<div class="hid"></div>'+
-          '<div class="hmeta">'+workoutSummary(rec.beeps)+'</div>'+
-        '</div>'+
-        '<button class="hdel" aria-label="刪除紀錄">✕</button>';
-      row.querySelector(".hid").textContent = title;
-      row.addEventListener("click", function(e){
-        if (e.target.closest(".hdel")) return;
-        if (id === VIDEO){ closeDrawer(); return; }
-        loadVideo(id); syncURL();
-      });
-      row.querySelector(".hdel").addEventListener("click", function(e){
+    openEl = el;
+    el.setAttribute("aria-hidden","false");
+    el.style.transform = "translateX(0)";
+    drawerBg.hidden = false;
+    requestAnimationFrame(function(){ drawerBg.style.opacity = "1"; });
+  }
+  function closeDrawer(){
+    if (openEl){
+      var left = openEl.classList.contains("left");
+      openEl.style.transform = left ? "translateX(-100%)" : "translateX(100%)";
+      openEl.setAttribute("aria-hidden","true");
+      openEl = null;
+    }
+    drawerBg.style.opacity = "0";
+    _bgT = setTimeout(function(){ drawerBg.hidden = true; _bgT = null; }, 280);
+  }
+
+  function openSettings(){
+    urlInput.value = ""; urlInput.placeholder = "目前 ID：" + VIDEO;
+    openDrawer(drawer);
+  }
+  function openHistory(){ renderHistory(); openDrawer(histDrawer); }
+  function openLibrary(){ renderLibrary(); openDrawer(libDrawer); }
+
+  // fab 按鈕
+  document.getElementById("settingsBtn").addEventListener("click", openSettings);
+  document.getElementById("historyBtn").addEventListener("click", openHistory);
+  document.getElementById("libraryBtn").addEventListener("click", openLibrary);
+
+  // 關閉
+  document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+  document.getElementById("histClose").addEventListener("click", closeDrawer);
+  document.getElementById("libClose").addEventListener("click", closeDrawer);
+  drawerBg.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", function(e){ if (e.key==="Escape") closeDrawer(); });
+
+  /* ---------- 歷史紀錄抽屜 ---------- */
+  var histList    = document.getElementById("histList");
+  var clearHistBtn = document.getElementById("clearHistBtn");
+
+  function makeHistCard(rec){
+    var id = rec.video_id;
+    var title = (rec.title && rec.title.trim()) ? rec.title.trim() : id;
+    var ts = Array.isArray(rec.beeps) ? rec.beeps : [];
+    var st = statsOf(ts);
+    var card = document.createElement("button");
+    card.className = "card" + (id === VIDEO ? " active" : "");
+    card.innerHTML =
+      '<span class="thumb">'+
+        '<span class="ph">'+
+          '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="rgba(255,255,255,.8)"/></svg>'+
+        '</span>'+
+        '<img src="https://i.ytimg.com/vi/'+id+'/mqdefault.jpg" alt="" onerror="this.style.display=\'none\'">'+
+        (st.dur ? '<span class="dur">'+fmtDurSec(st.dur)+'</span>' : '')+
+      '</span>'+
+      '<span class="meta">'+
+        '<span class="ttl">'+title+'</span>'+
+        '<span class="by"><span class="av" style="background:oklch(0.7 0.12 42)">自</span>自訂</span>'+
+        '<span class="stats">'+
+          (st.work ? '<span class="pill"><b>'+st.work+'</b> 組</span>' : '')+
+          (st.dur  ? '<span class="pill">'+fmtDurSec(st.dur)+'</span>' : '')+
+        '</span>'+
+      '</span>'+
+      '<span class="del2" role="button" aria-label="刪除">✕</span>';
+    card.addEventListener("click", function(e){
+      if (e.target.classList && e.target.classList.contains("del2")){
         e.stopPropagation();
         try{ Storage.remove(id); }catch(err){}
         renderHistory();
-      });
-      hlist.appendChild(row);
+        return;
+      }
+      if (id !== VIDEO){ loadVideo(id); syncURL(); }
+      closeDrawer();
+    });
+    return card;
+  }
+
+  function renderHistory(){
+    if (!histList) return;
+    var items = [];
+    try{ items = Storage.all().filter(function(r){ return r && r.video_id; }); }catch(e){ items=[]; }
+    items.sort(function(a,b){ return new Date(b.analyzed_at||0) - new Date(a.analyzed_at||0); });
+    histList.innerHTML = "";
+    if (!items.length){
+      var em = document.createElement("div"); em.className="lib-empty";
+      em.textContent="還沒有紀錄。載入任一計時後就會出現在這裡。";
+      histList.appendChild(em); return;
+    }
+    items.forEach(function(rec){ histList.appendChild(makeHistCard(rec)); });
+  }
+
+  clearHistBtn.addEventListener("click", function(){
+    // 清除所有 yst_ 開頭（per-video）的 localStorage 項目
+    try{
+      Object.keys(localStorage)
+        .filter(function(k){ return k.startsWith("yst_"); })
+        .forEach(function(k){ localStorage.removeItem(k); });
+    }catch(e){}
+    renderHistory();
+  });
+
+  /* ---------- 共享清單抽屜 ---------- */
+  var libList    = document.getElementById("libList");
+  var publishBtn = document.getElementById("publishBtn");
+  var authorInput = document.getElementById("authorInput");
+
+  // 初始化暱稱
+  (function(){
+    var saved = ls("yst-name");
+    if (saved && authorInput) authorInput.value = saved;
+  })();
+  if (authorInput){
+    authorInput.addEventListener("change", function(){
+      lsSet("yst-name", authorInput.value.trim());
     });
   }
 
-  /* ---------- 設定抽屜 / 分享 ---------- */
-  var settingsBtn = document.getElementById("settingsBtn");
-  var drawer = document.getElementById("drawer");
-  var drawerBg = document.getElementById("drawerBg");
-  var drawerClose = document.getElementById("drawerClose");
-  var urlInput = document.getElementById("urlInput");
-  var loadBtn = document.getElementById("loadBtn");
-  var volRange = document.getElementById("volRange");
-  var vlevel = document.getElementById("vlevel");
-  var volDown = document.getElementById("volDown");
-  var volUp = document.getElementById("volUp");
-  var addNow = document.getElementById("addNow");
-  var tlist = document.getElementById("tlist");
-  var copyLink = document.getElementById("copyLink");
-  var resetBtn = document.getElementById("resetBtn");
+  function makeLibCard(item){
+    var ts = Array.isArray(item.ts) ? item.ts : [];
+    var st = statsOf(ts);
+    var av = avColor(item.author||"?");
+    var card = document.createElement("button");
+    card.className = "card";
+    card.innerHTML =
+      '<span class="thumb">'+
+        '<span class="ph">'+
+          '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="rgba(255,255,255,.8)"/></svg>'+
+        '</span>'+
+        '<img src="https://i.ytimg.com/vi/'+(item.video||'')+'/mqdefault.jpg" alt="" onerror="this.style.display=\'none\'">'+
+        (st.dur ? '<span class="dur">'+fmtDurSec(st.dur)+'</span>' : '')+
+      '</span>'+
+      '<span class="meta">'+
+        '<span class="ttl">'+(item.title||'未命名訓練')+'</span>'+
+        '<span class="by">'+
+          '<span class="av" style="background:'+av+'">'+(item.author||'?').slice(0,1)+'</span>'+
+          (item.author||'匿名')+
+        '</span>'+
+        '<span class="stats">'+
+          (st.work ? '<span class="pill"><b>'+st.work+'</b> 組</span>' : '')+
+          (st.dur  ? '<span class="pill">'+fmtDurSec(st.dur)+'</span>' : '')+
+        '</span>'+
+      '</span>';
+    card.addEventListener("click", function(){
+      if (ts.length >= 2) loadTimerSet(item.video||VIDEO, ts);
+    });
+    return card;
+  }
+
+  function fetchShared(callback){
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", libApiUrl, true);
+    xhr.onload = function(){
+      if (xhr.status >= 200 && xhr.status < 300){
+        try{ callback(JSON.parse(xhr.responseText)); }
+        catch(e){ callback(null,"PARSE_ERR"); }
+      } else { callback(null,"HTTP_ERR"); }
+    };
+    xhr.onerror = function(){ callback(null,"NET_ERR"); };
+    xhr.send();
+  }
+
+  function publishShared(data, callback){
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", libApiUrl, true);
+    // text/plain 避免觸發 preflight OPTIONS（Apps Script 無法回應）
+    xhr.setRequestHeader("Content-Type","text/plain;charset=utf-8");
+    xhr.onload = function(){ callback(xhr.status >= 200 && xhr.status < 300); };
+    xhr.onerror = function(){ callback(false); };
+    xhr.send(JSON.stringify(data));
+  }
+
+  function renderLibrary(){
+    if (!libList) return;
+    if (!libApiUrl){
+      libList.innerHTML = '<div class="lib-empty">尚未設定共享來源。請在 config.js 填入 Google Apps Script URL 後重新整理。</div>';
+      return;
+    }
+    libList.innerHTML = '<div class="lib-empty">載入中…</div>';
+    fetchShared(function(items, err){
+      libList.innerHTML = "";
+      if (err || !items){
+        var em = document.createElement("div"); em.className="lib-empty";
+        em.textContent="無法載入共享清單，請稍後再試。";
+        libList.appendChild(em); return;
+      }
+      if (!items.length){
+        var em2 = document.createElement("div"); em2.className="lib-empty";
+        em2.textContent="清單還沒有內容，成為第一個分享的人吧！";
+        libList.appendChild(em2); return;
+      }
+      items.forEach(function(it){
+        // ts 在 Google Sheets 以逗號分隔字串儲存，需轉回陣列
+        var ts = typeof it.ts === "string"
+          ? it.ts.split(",").map(Number).filter(isFinite)
+          : (Array.isArray(it.ts) ? it.ts : []);
+        it.ts = ts;
+        libList.appendChild(makeLibCard(it));
+      });
+    });
+  }
+
+  function loadTimerSet(video, ts){
+    TS = ts.slice();
+    if (video && video !== VIDEO){
+      VIDEO = video;
+      clock = 0; prevIdx = -99; lastBeepR = -1;
+      started = false; setPlaying(false,false);
+      startBtn.style.display = ""; startBtn.classList.remove("hidden");
+      if (player && playerReady){ try{ player.cueVideoById(video); playerOk = true; }catch(e){} }
+      var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
+    } else {
+      clock = 0; started = false; setPlaying(false,false);
+      startBtn.style.display = ""; startBtn.classList.remove("hidden");
+    }
+    rebuild(); syncURL(); saveConfig();
+    closeDrawer();
+  }
+
+  if (publishBtn) publishBtn.addEventListener("click", function(){
+    if (!libApiUrl){
+      alert("請先在 config.js 填入共享清單 URL。");
+      return;
+    }
+    if (TS.length < 2){
+      alert("目前沒有時間點可以分享。");
+      return;
+    }
+    var st = statsOf(TS);
+    var stored = null;
+    try{ stored = Storage.load(VIDEO); }catch(e){}
+    var title = (stored && stored.title && stored.title.trim())
+      ? stored.title.trim()
+      : ("自訂訓練 · " + st.work + " 組 " + fmtDurSec(st.dur));
+    var author = (authorInput && authorInput.value.trim()) ? authorInput.value.trim() : "匿名";
+    lsSet("yst-name", author);
+
+    var orig = publishBtn.textContent;
+    publishBtn.textContent = "上傳中…";
+    publishBtn.disabled = true;
+
+    publishShared({
+      id: "u-" + Date.now(),
+      title: title,
+      author: author,
+      video: VIDEO,
+      ts: TS.map(function(x){ return Math.round(x*100)/100; }).join(",")
+    }, function(ok){
+      publishBtn.disabled = false;
+      if (ok){
+        publishBtn.textContent = "已加入清單 ✓";
+        renderLibrary();
+      } else {
+        publishBtn.textContent = "上傳失敗，請稍後再試";
+      }
+      setTimeout(function(){ publishBtn.textContent = orig; }, 2000);
+    });
+  });
+
+  /* ---------- 設定抽屜 ---------- */
+  var urlInput  = document.getElementById("urlInput");
+  var loadBtn   = document.getElementById("loadBtn");
+  var volRange  = document.getElementById("volRange");
+  var vlevel    = document.getElementById("vlevel");
+  var volDown   = document.getElementById("volDown");
+  var volUp     = document.getElementById("volUp");
+  var addNow    = document.getElementById("addNow");
+  var tlist     = document.getElementById("tlist");
+  var copyLink  = document.getElementById("copyLink");
+  var resetBtn  = document.getElementById("resetBtn");
 
   function fmtMs(s){
     var neg = s<0; s = Math.abs(s);
@@ -535,7 +765,7 @@
   function loadVideo(id){
     if (!id) return;
     VIDEO = id;
-    // 切換影片時，載入該影片既有時間點；若無則沿用目前的（讓使用者可套用同一組節奏）
+    // 切換影片時，載入該影片既有時間點；若無則沿用目前的
     try{
       var rec = Storage.load(VIDEO);
       if (rec && Array.isArray(rec.beeps) && rec.beeps.length >= 2) TS = rec.beeps.slice();
@@ -557,22 +787,6 @@
     if (vlevel) vlevel.textContent = level + " / 10";
     saveConfig();
   }
-
-  function openDrawer(){
-    drawer.classList.add("open"); drawer.setAttribute("aria-hidden","false");
-    drawerBg.hidden = false;
-    if (typeof renderHistory === "function") renderHistory();
-    urlInput.value = ""; urlInput.placeholder = "目前 ID：" + VIDEO;
-  }
-  function closeDrawer(){
-    drawer.classList.remove("open"); drawer.setAttribute("aria-hidden","true");
-    setTimeout(function(){ drawerBg.hidden = true; }, 280);
-  }
-
-  settingsBtn.addEventListener("click", openDrawer);
-  drawerClose.addEventListener("click", closeDrawer);
-  drawerBg.addEventListener("click", closeDrawer);
-  document.addEventListener("keydown", function(e){ if (e.key==="Escape") closeDrawer(); });
 
   loadBtn.addEventListener("click", function(){
     var id = parseVideoId(urlInput.value);
@@ -613,8 +827,6 @@
       if (bp === "0"){ beepOn=false; beepBtn.setAttribute("data-on","false"); }
     }catch(e){}
 
-    var volRange = document.getElementById("volRange");
-    var vlevel = document.getElementById("vlevel");
     if (volRange) volRange.value = level;
     if (vlevel) vlevel.textContent = level + " / 10";
 
