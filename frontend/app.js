@@ -596,9 +596,27 @@
     xhr.open("POST", libApiUrl, true);
     // text/plain 避免觸發 preflight OPTIONS（Apps Script 無法回應）
     xhr.setRequestHeader("Content-Type","text/plain;charset=utf-8");
-    xhr.onload = function(){ callback(xhr.status >= 200 && xhr.status < 300); };
-    xhr.onerror = function(){ callback(false); };
+    xhr.onload = function(){
+      var resp = null;
+      try{ resp = JSON.parse(xhr.responseText); }catch(e){}
+      var httpOk = xhr.status >= 200 && xhr.status < 300;
+      // 後端可能回 {ok:false, error:"duplicate"}（HTTP 仍是 200）
+      var ok = httpOk && (!resp || resp.ok !== false);
+      callback(ok, resp);
+    };
+    xhr.onerror = function(){ callback(false, null); };
     xhr.send(JSON.stringify(data));
+  }
+
+  // 把時間點陣列正規化成可比對的字串（四捨五入到小數兩位）
+  function normTs(arr){
+    return (arr||[]).map(function(x){ return Math.round(x*100)/100; }).join(",");
+  }
+  // 從共享項目取出時間點陣列（Sheets 以逗號字串儲存）
+  function itemTsArr(it){
+    return typeof it.ts === "string"
+      ? it.ts.split(",").map(Number).filter(isFinite)
+      : (Array.isArray(it.ts) ? it.ts : []);
   }
 
   function renderLibrary(){
@@ -667,24 +685,50 @@
     lsSet("yst-name", author);
 
     var orig = publishBtn.textContent;
-    publishBtn.textContent = "上傳中…";
-    publishBtn.disabled = true;
+    var myKey = VIDEO + "|" + normTs(TS);
 
-    publishShared({
-      id: "u-" + Date.now(),
-      title: title,
-      author: author,
-      video: VIDEO,
-      ts: TS.map(function(x){ return Math.round(x*100)/100; }).join(",")
-    }, function(ok){
+    function resetBtn(msg){
       publishBtn.disabled = false;
-      if (ok){
-        publishBtn.textContent = "已加入清單 ✓";
-        renderLibrary();
-      } else {
-        publishBtn.textContent = "上傳失敗，請稍後再試";
-      }
+      publishBtn.textContent = msg;
       setTimeout(function(){ publishBtn.textContent = orig; }, 2000);
+    }
+
+    function doPublish(){
+      publishBtn.textContent = "上傳中…";
+      publishShared({
+        id: "u-" + Date.now(),
+        title: title,
+        author: author,
+        video: VIDEO,
+        ts: normTs(TS)
+      }, function(ok, resp){
+        if (ok){
+          publishBtn.disabled = false;
+          publishBtn.textContent = "已加入清單 ✓";
+          renderLibrary();
+          setTimeout(function(){ publishBtn.textContent = orig; }, 2000);
+        } else if (resp && resp.error === "duplicate"){
+          // 後端擋下的重複（並發情況）
+          resetBtn("已有相同的分享了");
+          renderLibrary();
+        } else {
+          resetBtn("上傳失敗，請稍後再試");
+        }
+      });
+    }
+
+    // 送出前先抓最新清單，比對是否已有「同影片 + 相同時間點」的分享
+    publishBtn.textContent = "檢查中…";
+    publishBtn.disabled = true;
+    fetchShared(function(items, err){
+      if (!err && Array.isArray(items)){
+        var dup = items.some(function(it){
+          return ((it.video||"") + "|" + normTs(itemTsArr(it))) === myKey;
+        });
+        if (dup){ resetBtn("已有相同的分享了"); return; }
+      }
+      // 抓清單失敗就直接送出，交由後端做最終把關
+      doPublish();
     });
   });
 

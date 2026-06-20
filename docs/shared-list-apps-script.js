@@ -51,15 +51,42 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+/** 把時間點字串正規化成可比對的格式（四捨五入到小數兩位） */
+function normTs(s) {
+  return String(s == null ? "" : s)
+    .split(",")
+    .map(function(x){ return Math.round(parseFloat(x) * 100) / 100; })
+    .filter(function(x){ return isFinite(x); })
+    .join(",");
+}
+
 /**
  * POST — 新增一筆項目
  * 前端以 Content-Type: text/plain;charset=utf-8 發送 JSON 字串，
  * 避免觸發瀏覽器的 preflight OPTIONS（Apps Script 無法回應 OPTIONS）。
+ *
+ * 重複判斷：同一支影片 + 完全相同的時間點視為重複，直接拒絕，
+ * 回傳 { ok:false, error:"duplicate" }。
  */
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
     var sh = getSheet();
+
+    // 比對現有資料是否已有「同影片 + 相同時間點」
+    var vCol = COLUMNS.indexOf("video");
+    var tCol = COLUMNS.indexOf("ts");
+    var data = sh.getDataRange().getValues();
+    var newVideo = String(body.video || "");
+    var newTs = normTs(body.ts);
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][vCol]) === newVideo && normTs(data[i][tCol]) === newTs) {
+        return ContentService
+          .createTextOutput(JSON.stringify({ ok: false, error: "duplicate" }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     var row = COLUMNS.map(function(col) {
       if (col === "created_at") return new Date().toISOString();
       return body[col] !== undefined ? String(body[col]) : "";
