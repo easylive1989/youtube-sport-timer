@@ -11,12 +11,6 @@
      ============================================================ */
 
   /* ---------- config / params ---------- */
-  var DEFAULT_VIDEO = "LmrKejHOaG4";
-  var DEFAULT_TS = [40.49,85.09,100.59,145.56,160.59,205.56,220.59,265.56,280.59,325.56,
-    340.59,385.56,400.59,445.56,460.59,505.56,520.59,565.56,580.59,625.56,640.59,685.56,
-    700.59,745.56,760.59,805.56,820.59,865.56,880.59,925.56,940.59,985.56,1000.59,1045.56,
-    1060.59,1105.56,1120.59,1165.56,1180.59,1225.56,1240.59];
-
   var libApiUrl = (window.YST_CONFIG && window.YST_CONFIG.sharedApiUrl) || "";
   var AV_COLORS = ["oklch(0.70 0.185 42)","oklch(0.74 0.115 205)","oklch(0.76 0.16 152)","oklch(0.84 0.155 92)","oklch(0.7 0.16 330)"];
 
@@ -25,7 +19,8 @@
   function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 
   var urlV = params.get("v"), urlT = params.get("t");
-  var VIDEO = (urlV && urlV.trim()) ? urlV.trim() : (ls("yst-video") || DEFAULT_VIDEO);
+  // 沒有任何預設影片：僅在網址帶 v 或本機曾儲存時才有影片，否則為空待使用者指定
+  var VIDEO = (urlV && urlV.trim()) ? urlV.trim() : (ls("yst-video") || "");
 
   var TS = null;
   if (urlT && urlT.indexOf(",") !== -1){
@@ -33,13 +28,33 @@
     if (a.length >= 2) TS = a;
   }
   // 其次：該影片在 Storage 內既有的時間點
-  if (!TS){
+  if (!TS && VIDEO){
     try{
       var rec = Storage.load(VIDEO);
       if (rec && Array.isArray(rec.beeps) && rec.beeps.length >= 2) TS = rec.beeps.slice();
     }catch(e){}
   }
-  if (!TS) TS = DEFAULT_TS.slice();
+  if (!TS) TS = [];
+
+  /* ---------- 影片狀態 helpers ---------- */
+  function hasVideo(){ return !!(VIDEO && VIDEO.trim()); }
+  // 一律以完整 YouTube 連結對外呈現（而非僅影片 ID）
+  function videoUrl(id){ return id ? "https://www.youtube.com/watch?v=" + id : ""; }
+  function setCurVid(){
+    var cv = document.getElementById("curVid");
+    if (cv) cv.textContent = hasVideo() ? videoUrl(VIDEO) : "尚未載入影片";
+  }
+  // 依「是否已載入影片」切換主畫面：未載入時隱藏開始鍵、佔位區顯示提示
+  function reflectVideoState(){
+    var pt = document.querySelector(".poster .ptxt");
+    if (hasVideo()){
+      if (pt) pt.textContent = "YOUTUBE 影片";
+      if (!started){ startBtn.style.display = ""; startBtn.classList.remove("hidden"); }
+    } else {
+      if (pt) pt.textContent = "請在設定貼上 YouTube 連結";
+      startBtn.style.display = "none"; startBtn.classList.add("hidden");
+    }
+  }
 
   // 提示音量採對數（感知）刻度：每一階提升的響度感受一致
   var VOL_CURVE = [0, 0.1, 0.14, 0.2, 0.28, 0.4, 0.55, 0.7, 0.82, 0.92, 1.0];
@@ -102,7 +117,8 @@
     buildProgress();
     if (typeof renderTimers === "function") renderTimers();
     prevIdx = -99; lastBeepR = -1;
-    var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
+    setCurVid();
+    reflectVideoState();
     var tc = document.getElementById("tCount"); if (tc) tc.textContent = TS.length;
   }
 
@@ -151,7 +167,10 @@
       }
     }catch(e){}
   }
-  window.onYouTubeIframeAPIReady = function(){
+  var apiReady = false;
+  // 實際建立播放器；僅在已有影片時呼叫
+  function createPlayer(){
+    if (player || !apiReady || !hasVideo()) return;
     try{
       player = new YT.Player("player", {
         videoId: VIDEO,
@@ -172,6 +191,10 @@
         }
       });
     }catch(e){ playerOk=false; }
+  }
+  window.onYouTubeIframeAPIReady = function(){
+    apiReady = true;
+    createPlayer();   // 沒有影片時此呼叫會直接返回，待使用者載入時再建立
   };
 
   /* ---------- engine state ---------- */
@@ -230,6 +253,17 @@
   }
 
   function update(t){
+    // 尚無時間點（未載入影片或影片還沒設定時間點）：顯示待機，不進入計時/完成狀態
+    if (!phases.length){
+      setPhaseTheme("ready");
+      elPhase.textContent = PH_TEXT.ready;
+      elCount.textContent = "--";
+      elRep.textContent = hasVideo() ? "尚未設定時間點" : "尚未載入影片";
+      elNext.innerHTML = '<span class="dot"></span>' + (hasVideo() ? "請在設定加入時間點" : "請在設定貼上 YouTube 連結");
+      elRing.style.strokeDashoffset = RING_C;
+      elElapsed.textContent = "00:00 / 00:00";
+      return;
+    }
     var r = findPhase(t);
     var idx = r.idx;
     var type, timeLeft, dur, ph;
@@ -448,7 +482,9 @@
   }
 
   function openSettings(){
-    urlInput.value = ""; urlInput.placeholder = "目前 ID：" + VIDEO;
+    urlInput.value = "";
+    urlInput.placeholder = hasVideo() ? videoUrl(VIDEO) : "貼上完整 YouTube 連結";
+    setCurVid();
     openDrawer(drawer);
   }
   function openHistory(){ renderHistory(); openDrawer(histDrawer); }
@@ -657,7 +693,8 @@
       started = false; setPlaying(false,false);
       startBtn.style.display = ""; startBtn.classList.remove("hidden");
       if (player && playerReady){ try{ player.cueVideoById(video); playerOk = true; }catch(e){} }
-      var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
+      else { createPlayer(); }
+      setCurVid();
     } else {
       clock = 0; started = false; setPlaying(false,false);
       startBtn.style.display = ""; startBtn.classList.remove("hidden");
@@ -742,7 +779,6 @@
   var addNow    = document.getElementById("addNow");
   var tlist     = document.getElementById("tlist");
   var copyLink  = document.getElementById("copyLink");
-  var resetBtn  = document.getElementById("resetBtn");
 
   function fmtMs(s){
     var neg = s<0; s = Math.abs(s);
@@ -781,6 +817,7 @@
   }
 
   function syncURL(){
+    if (!hasVideo()) return;   // 尚未指定影片時不寫入網址參數
     try{
       var u = new URL(location.href);
       u.searchParams.set("v", VIDEO);
@@ -790,8 +827,9 @@
   }
 
   function saveConfig(){
-    lsSet("yst-video", VIDEO);
     lsSet("yst-vol", String(level));
+    if (!hasVideo()) return;   // 沒有影片就不持久化，避免產生空白歷史紀錄
+    lsSet("yst-video", VIDEO);
     // per-video 時間點存進 Storage（沿用專案既有資料結構）
     try{
       var existing = Storage.load(VIDEO) || {};
@@ -818,8 +856,9 @@
     started = false; setPlaying(false,false);
     startBtn.style.display = ""; startBtn.classList.remove("hidden");
     if (player && playerReady){ try{ player.cueVideoById(id); playerOk = true; }catch(e){} }
+    else { createPlayer(); }   // 首次載入影片時才建立播放器
     rebuild();
-    var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
+    setCurVid();
     saveConfig();
     update(clock);
   }
@@ -834,8 +873,8 @@
 
   loadBtn.addEventListener("click", function(){
     var id = parseVideoId(urlInput.value);
-    if (id){ loadVideo(id); syncURL(); urlInput.value=""; urlInput.placeholder="目前 ID："+VIDEO; }
-    else { urlInput.value=""; urlInput.placeholder="連結無效，請再試一次"; }
+    if (id){ loadVideo(id); syncURL(); urlInput.value=""; urlInput.placeholder=videoUrl(VIDEO); }
+    else { urlInput.value=""; urlInput.placeholder="連結無效，請貼上完整 YouTube 連結"; }
   });
   urlInput.addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); loadBtn.click(); } });
 
@@ -845,6 +884,7 @@
   volUp.addEventListener("click", function(){ setVolume(level+1); ensureAudio(); tone(880,0.1,0,"square",0.16); });
 
   addNow.addEventListener("click", function(){
+    if (!hasVideo()) return;   // 尚未載入影片時不加入時間點
     var t = Math.round(Math.max(0, clock)*100)/100;
     TS.push(t); rebuild(); syncURL(); saveConfig();
   });
@@ -855,13 +895,6 @@
     var done = function(){ copyLink.textContent = "已複製連結 ✓"; setTimeout(function(){ copyLink.textContent = orig; }, 1500); };
     if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(location.href).then(done, done); }
     else { done(); }
-  });
-
-  resetBtn.addEventListener("click", function(){
-    TS = DEFAULT_TS.slice();
-    setVolume(6);
-    loadVideo(DEFAULT_VIDEO);
-    rebuild(); syncURL(); saveConfig();
   });
 
   /* ---------- restore + init ---------- */
@@ -880,8 +913,8 @@
     if (!isNaN(tt) && tt > 1 && tt < T_END){ restoreTime = tt; clock = tt; }
 
     document.documentElement.style.setProperty("--phase", PH_LIT.ready);
-    var cv = document.getElementById("curVid"); if (cv) cv.textContent = VIDEO;
-    saveConfig();      // 持久化目前影片與時間點（並渲染歷史）
+    setCurVid();
+    if (hasVideo()) saveConfig();   // 有影片才持久化（並渲染歷史）
     update(clock);
   })();
 
