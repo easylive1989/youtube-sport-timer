@@ -655,33 +655,63 @@
       : (Array.isArray(it.ts) ? it.ts : []);
   }
 
+  // 共享清單快取：load 過一次就存起來，下次先用 cache 立即顯示
+  var LIB_CACHE_KEY = "yst-shared-cache";
+  function loadLibCache(){
+    try{
+      var arr = JSON.parse(ls(LIB_CACHE_KEY));
+      return Array.isArray(arr) ? arr : null;
+    }catch(e){ return null; }
+  }
+  function saveLibCache(items){
+    try{ lsSet(LIB_CACHE_KEY, JSON.stringify(items)); }catch(e){}
+  }
+
+  // 依共享項目陣列渲染卡片（不會改動傳入的物件，避免汙染 cache）
+  function renderLibItems(items){
+    libList.innerHTML = "";
+    if (!items.length){
+      var em2 = document.createElement("div"); em2.className="lib-empty";
+      em2.textContent="清單還沒有內容，成為第一個分享的人吧！";
+      libList.appendChild(em2); return;
+    }
+    items.forEach(function(it){
+      // ts 在 Google Sheets 以逗號分隔字串儲存，需轉回陣列
+      var ts = typeof it.ts === "string"
+        ? it.ts.split(",").map(Number).filter(isFinite)
+        : (Array.isArray(it.ts) ? it.ts : []);
+      var copy = {}; for (var k in it){ copy[k] = it[k]; }
+      copy.ts = ts;
+      libList.appendChild(makeLibCard(copy));
+    });
+  }
+
   function renderLibrary(){
     if (!libList) return;
     if (!libApiUrl){
       libList.innerHTML = '<div class="lib-empty">尚未設定共享來源。請在 config.js 填入 Google Apps Script URL 後重新整理。</div>';
       return;
     }
-    libList.innerHTML = '<div class="lib-empty">載入中…</div>';
+    // 先用 cache 立即顯示，沒有 cache 才顯示「載入中…」
+    var cached = loadLibCache();
+    var cachedJson = cached ? JSON.stringify(cached) : null;
+    if (cached){ renderLibItems(cached); }
+    else { libList.innerHTML = '<div class="lib-empty">載入中…</div>'; }
+
+    // 同時打遠端 API 更新
     fetchShared(function(items, err){
-      libList.innerHTML = "";
       if (err || !items){
+        // 有 cache 就保留 cache 內容，不覆蓋成錯誤訊息
+        if (cached) return;
+        libList.innerHTML = "";
         var em = document.createElement("div"); em.className="lib-empty";
         em.textContent="無法載入共享清單，請稍後再試。";
         libList.appendChild(em); return;
       }
-      if (!items.length){
-        var em2 = document.createElement("div"); em2.className="lib-empty";
-        em2.textContent="清單還沒有內容，成為第一個分享的人吧！";
-        libList.appendChild(em2); return;
-      }
-      items.forEach(function(it){
-        // ts 在 Google Sheets 以逗號分隔字串儲存，需轉回陣列
-        var ts = typeof it.ts === "string"
-          ? it.ts.split(",").map(Number).filter(isFinite)
-          : (Array.isArray(it.ts) ? it.ts : []);
-        it.ts = ts;
-        libList.appendChild(makeLibCard(it));
-      });
+      saveLibCache(items);
+      // 內容沒變就不重畫，避免閃動
+      if (cachedJson === JSON.stringify(items)) return;
+      renderLibItems(items);
     });
   }
 
