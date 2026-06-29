@@ -137,7 +137,7 @@
     var o = actx.createOscillator(), g = actx.createGain();
     o.type = type||"sine"; o.frequency.value = freq;
     o.connect(g); g.connect(actx.destination);
-    var peak = Math.max(0.0002, (gainVal||0.18) * masterVol);
+    var peak = Math.max(0.0002, Math.min(0.85, (gainVal||0.18) * masterVol * 3));
     g.gain.setValueAtTime(0.0001, t0);
     g.gain.exponentialRampToValueAtTime(peak, t0+0.012);
     g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
