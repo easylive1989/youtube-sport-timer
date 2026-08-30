@@ -123,30 +123,67 @@
   }
 
   /* ---------- audio ---------- */
-  var actx = null, beepOn = true;
+  var actx = null, beepOn = true, keepAliveNode = null;
+  function startKeepAlive(){
+    if (!actx || keepAliveNode) return;
+    try {
+      // 建立一個極小長度（1秒）的無聲 buffer 並循環播放，維持 Android AudioTrack 管道活躍避免進入 Standby
+      var buffer = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+      var src = actx.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+      var silenceGain = actx.createGain();
+      silenceGain.gain.value = 0.00001; // 近似靜音但確保音訊流持續傳輸
+      src.connect(silenceGain);
+      silenceGain.connect(actx.destination);
+      src.start();
+      keepAliveNode = src;
+    } catch(e){}
+  }
+
   function ensureAudio(){
     if (!actx){
       try { actx = new (window.AudioContext||window.webkitAudioContext)(); }
       catch(e){ return; }
     }
-    if (actx.state === "suspended") actx.resume();
+    if (actx.state === "suspended"){
+      actx.resume().then(function(){
+        startKeepAlive();
+      }).catch(function(){});
+    } else {
+      startKeepAlive();
+    }
   }
+
   function tone(freq, dur, when, type, gainVal){
-    if (!actx || !beepOn || masterVol<=0) return;
-    var t0 = actx.currentTime + (when||0);
+    if (!beepOn || masterVol<=0) return;
+    ensureAudio();
+    if (!actx) return;
+
+    var now = actx.currentTime;
+    // 加入 10ms 緩衝時間，確保 Android 硬體時鐘同步，避免 exponentialRamp 直接跳到結尾
+    var t0 = Math.max(now, now + (when||0)) + 0.01;
+    var attack = 0.02; // 20ms attack，防止方波/尖銳諧波產生瞬態直流衝擊觸發 Android Smart PA 壓音
     var o = actx.createOscillator(), g = actx.createGain();
-    o.type = type||"sine"; o.frequency.value = freq;
-    o.connect(g); g.connect(actx.destination);
-    var peak = Math.max(0.0002, Math.min(0.85, (gainVal||0.18) * masterVol * 3));
+
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, t0);
+    o.connect(g);
+    g.connect(actx.destination);
+
+    var peak = Math.max(0.001, Math.min(0.85, (gainVal||0.18) * masterVol * 2.8));
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(peak, t0+0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
-    o.start(t0); o.stop(t0+dur+0.03);
+    g.gain.linearRampToValueAtTime(peak, t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    o.start(t0);
+    o.stop(t0 + dur + 0.05);
   }
-  function beepCount(){ tone(880,0.12,0,"square",0.16); }                 // 3-2-1
-  function cueWork(){ tone(1318,0.16,0,"sawtooth",0.20); tone(1760,0.20,0.14,"sawtooth",0.18); }
-  function cueRest(){ tone(523,0.40,0,"sine",0.18); }
-  function cueDone(){ [659,880,1175,1568].forEach(function(f,i){ tone(f,0.24,i*0.16,"triangle",0.17); }); }
+
+  function beepCount(){ tone(880, 0.12, 0, "triangle", 0.22); }                 // 3-2-1 使用 triangle 諧波柔和不失清晰，不易觸發 PA 降音
+  function cueWork(){ tone(1318, 0.16, 0, "triangle", 0.24); tone(1760, 0.20, 0.15, "triangle", 0.22); }
+  function cueRest(){ tone(523, 0.40, 0, "sine", 0.22); }
+  function cueDone(){ [659,880,1175,1568].forEach(function(f,i){ tone(f,0.24,i*0.16,"triangle",0.20); }); }
 
   /* ---------- youtube player ---------- */
   var player=null, playerReady=false, playerOk=false;
@@ -217,9 +254,33 @@
   var PH_TEXT = { ready:"準備", work:"運動", rest:"休息", done:"完成" };
   var PH_LIT = { ready:"oklch(0.84 0.155 92)", work:"oklch(0.70 0.185 42)", rest:"oklch(0.74 0.115 205)", done:"oklch(0.76 0.16 152)" };
 
+  /* ---------- screen wake lock ---------- */
+  var wakeLock = null;
+  async function requestWakeLock(){
+    if ("wakeLock" in navigator && !wakeLock && playing){
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", function(){ wakeLock = null; });
+      } catch(e){}
+    }
+  }
+  function releaseWakeLock(){
+    if (wakeLock){
+      try { wakeLock.release(); } catch(e){}
+      wakeLock = null;
+    }
+  }
+  document.addEventListener("visibilitychange", function(){
+    if (document.visibilityState === "visible" && playing){
+      requestWakeLock();
+    }
+  });
+
   function setPlaying(v, fromPlayer){
     playing = v;
     app.setAttribute("data-playing", v?"true":"false");
+    if (v) { requestWakeLock(); }
+    else   { releaseWakeLock(); }
     if (!fromPlayer && usingPlayer()){
       if (v) { try{ player.playVideo(); }catch(e){} }
       else   { try{ player.pauseVideo(); }catch(e){} }
